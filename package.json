@@ -1,0 +1,14 @@
+{
+  "name": "bloom",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "preview": "node scripts/preview.mjs",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
