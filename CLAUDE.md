@@ -22,14 +22,23 @@ Tauri 2. Public repo: `Amine097/bloom`.
   Rust is not installed on the Windows dev machine; the shell is compiled by GitHub Actions.
 - `tests/` — `npm test` (Node's built-in runner) covers the pure logic: recall scheduling,
   week maths, quick-add parsing.
-- `.github/workflows/build.yml` — builds on every push to `main`; a `v*` tag publishes a release
-  (`.dmg` + updater files) that installed copies pick up at launch.
+- `.github/workflows/build.yml` — tests and builds every push to `main`; a push to `deploy` also
+  publishes a release (`.dmg` + updater files) that installed copies pick up at launch.
 
 ## Releasing an update
 
-`scripts/release.ps1 0.2.0 "What changed, in words she will read"` bumps the version in the three
-places it lives, writes `release-notes.md`, commits, tags and pushes. The app shows those notes
-in its "Update available" dialog and only installs after she agrees.
+Pushing to the `deploy` branch publishes a release; nothing else is needed:
+
+    git push origin main:deploy
+
+The workflow tests, builds, tags and publishes. The version is one patch step above the latest
+`v*` tag (`scripts/next-version.mjs`; run it without arguments to preview). For a bigger jump, set
+a higher `"version"` in `package.json` first. The version files in the repo are only rewritten
+inside the build, so they can lag behind the tags; the tags are the source of truth.
+
+The notes she sees in the "update ready" dialog are `release-notes.md` if it was edited since the
+last release, otherwise the commit subjects since then, so write those in plain words. The app
+only installs after she agrees.
 
 The updater signing key is in `~/.tauri/bloom.key` (never commit it) and in the repo secret
 `TAURI_SIGNING_PRIVATE_KEY`. Losing it means installed copies can no longer update.

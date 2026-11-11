@@ -1,12 +1,18 @@
 name: Build
 
-# Every push to main is compiled, so a broken shell is caught early.
-# A tag like v0.2.0 also publishes a release: the .dmg plus the files the in-app updater reads.
+# main:   every push is tested and compiled, nothing is published.
+# deploy: every push is tested, compiled and published as a new release. Installed copies of
+#         Bloom offer it at their next launch. To ship what is on main:
+#             git push origin main:deploy
+#         The version number is worked out by scripts/next-version.mjs.
 on:
   push:
-    branches: [main]
-    tags: ["v*"]
+    branches: [main, deploy]
   workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   test:
@@ -23,8 +29,12 @@ jobs:
     runs-on: macos-latest
     permissions:
       contents: write
+    env:
+      DEPLOY: ${{ github.ref == 'refs/heads/deploy' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the release version is derived from the existing tags
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -36,15 +46,10 @@ jobs:
           workspaces: "./src-tauri -> target"
       - run: npm install
 
-      - name: Read release notes
-        id: notes
-        run: |
-          {
-            echo 'body<<BLOOM_NOTES_EOF'
-            cat release-notes.md
-            echo
-            echo 'BLOOM_NOTES_EOF'
-          } >> "$GITHUB_OUTPUT"
+      - name: Work out the release version and notes
+        id: next
+        if: env.DEPLOY == 'true'
+        run: node scripts/next-version.mjs --apply
 
       - uses: tauri-apps/tauri-action@v0
         env:
@@ -52,15 +57,16 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
-          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
-          releaseName: Bloom ${{ github.ref_name }}
-          releaseBody: ${{ steps.notes.outputs.body }}
+          tagName: ${{ env.DEPLOY == 'true' && format('v{0}', steps.next.outputs.version) || '' }}
+          releaseName: Bloom v${{ steps.next.outputs.version }}
+          releaseBody: ${{ steps.next.outputs.notes }}
+          releaseCommitish: ${{ github.sha }}
           releaseDraft: false
           prerelease: false
           args: --target aarch64-apple-darwin
 
-      - name: Keep the installer from untagged builds
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+      - name: Keep the installer from builds that are not released
+        if: env.DEPLOY != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: Bloom-dmg

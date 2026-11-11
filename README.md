@@ -8,4 +8,5 @@ to-do list. Everything is stored on the Mac it runs on.
   certificate, so the first launch needs *System Settings → Privacy & Security → Open Anyway*.
 - **Updates:** Bloom checks for a new release when it starts and asks before installing it.
 - **Develop:** `npm install`, then `npm run preview` and open http://localhost:4173. `npm test`
-  runs the logic tests. See `CLAUDE.md` for the layout and how to publish an update.
+  runs the logic tests. See `CLAUDE.md` for the layout.
+- **Release:** `git push origin main:deploy` publishes a new version.
