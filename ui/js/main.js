@@ -1,6 +1,6 @@
 // Start-up, navigation, event wiring and the update prompt.
 import { D, load, save, onSaveError, inApp, pendingRecalls, deadlinesList, tasksList, currentWeek } from "./store.js";
-import { today, addDays } from "./dates.js";
+import { today, addDays, weekLabel } from "./dates.js";
 import { $, esc, icon, app, toast, openModal, bindModal, field, input, FLOWER } from "./ui.js";
 import * as dashboard from "./views/dashboard.js";
 import * as todo from "./views/todo.js";
@@ -43,14 +43,19 @@ function renderNav() {
     deadlines: deadlinesList().filter(d => !d.done && d.due.slice(0, 10) <= addDays(now, 7)).length,
     courses: pendingRecalls().filter(r => r.due <= now).length,
   };
-  const item = key => `<button class="nav-item" data-nav="${key}" ${current === key ? 'aria-current="page"' : ""}>${icon(VIEWS[key].icon)}<span>${VIEWS[key].label}</span>${counts[key] ? `<span class="count">${counts[key]}</span>` : ""}</button>`;
+  const item = key => `<button class="nav-item" data-nav="${key}" title="${VIEWS[key].label}" ${current === key ? 'aria-current="page"' : ""}><span class="bubble">${icon(VIEWS[key].icon, 17)}</span><span class="nav-label">${VIEWS[key].label}</span>${counts[key] ? `<span class="count">${counts[key]}</span>` : ""}</button>`;
   const cw = currentWeek();
+  const name = D.settings.name || "Bloom";
+  const alerts = counts.todo + counts.deadlines + counts.courses;
   $("#nav").innerHTML = `
     <div class="brand"><span class="logo">${FLOWER}</span><b>Bloom</b></div>
-    ${["dashboard", "todo", "deadlines", "courses", "planner", "notebook"].map(item).join("")}
+    <div class="nav-list">${["dashboard", "todo", "deadlines", "courses", "planner", "notebook", "settings"].map(item).join("")}</div>
     <span class="grow"></span>
-    <div class="nav-week">${cw >= 1 ? `Week ${cw}` : "Pre-semester"}</div>
-    ${item("settings")}`;
+    <div class="profile">
+      <div class="avatar">${esc(name[0].toUpperCase())}${alerts ? `<span class="count" title="Things waiting today">${alerts}</span>` : ""}</div>
+      <b>${esc(name)}</b>
+      <small>${cw >= 1 ? `Week ${cw} · ${weekLabel(cw, D.settings.semesterStart)}` : "Before week 1"}</small>
+    </div>`;
 }
 
 function refresh() {

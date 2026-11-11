@@ -25,6 +25,8 @@ const PATHS = {
   close: "M6 6l12 12M18 6L6 18",
   clock: "M12 21a9 9 0 100-18 9 9 0 000 18zM12 7v5l3 2",
   check: "M5 12l5 5 9-10",
+  arrow: "M7 17L17 7M9 7h8v8",
+  dots: "M6 12h.01M12 12h.01M18 12h.01",
   grip: "M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01",
 };
 export const icon = (name, size = 18) =>
