@@ -64,7 +64,7 @@ export function seedData() {
 
   return {
     version: 1,
-    settings: { name: "", semesterStart: "2026-09-14", recall1: 7, recall2: 14, maxRecallsPerDay: 4, theme: "auto", welcomed: false },
+    settings: { name: "", semesterStart: "2026-09-14", recall1: 7, recall2: 14, maxRecallsPerDay: 4, theme: "auto", background: "nature", welcomed: false },
     modules,
     items,
     deadlines: {},

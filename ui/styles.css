@@ -30,6 +30,8 @@
   --s-recall1: #ec6a9b;
   --s-recall2: #c9356d;
 
+  --sky1: #e4f3fb; --sky2: #fdf3f1; --sky3: #ffdde8; --sun: #fff6dc; --cloud: rgba(255, 255, 255, .6);
+  --hill3: #e6c6dc; --hill2: #b9dab6; --hill1: #98cc9b;
   --radius: 16px;
   font-family: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, "Segoe UI", "Nunito", system-ui, sans-serif;
   font-size: 15px;
@@ -50,6 +52,8 @@
   --ok: #5fd0ab;
   --warn: #f2a654;
   --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+  --sky1: #171226; --sky2: #2a1832; --sky3: #4b2444; --sun: #8a4267; --cloud: rgba(255, 255, 255, .05);
+  --hill3: #3b2545; --hill2: #223a35; --hill1: #1a2e2b;
   --s-seen: #6b3350;
   --s-quizzed: #9a3f69;
   --s-recall1: #cf5489;
@@ -79,7 +83,7 @@ code { background: var(--accent-soft); color: var(--accent-ink); padding: 1px 6p
 /* ---- layout */
 #app { display: flex; height: 100%; }
 #nav { width: 212px; flex: none; display: flex; flex-direction: column; gap: 2px; padding: 18px 12px 14px; background: var(--surface); border-right: 1px solid var(--line); }
-#main { flex: 1; min-width: 0; overflow-y: auto; padding: 28px 34px 60px; scroll-behavior: smooth; }
+#main { position: relative; z-index: 1; flex: 1; min-width: 0; overflow-y: auto; padding: 28px 34px 60px; scroll-behavior: smooth; }
 #main > * { max-width: 1120px; margin-left: auto; margin-right: auto; }
 
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 18px; font-size: 20px; }
@@ -288,3 +292,18 @@ i.s-seen { background: var(--s-seen); } i.s-quizzed { background: var(--s-quizze
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 99px; border: 2px solid var(--bg); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+
+/* ---- backdrop: meadow and butterflies (js/scene.js) */
+#scene { position: fixed; inset: 0 0 0 212px; z-index: 0; overflow: hidden; pointer-events: none; }
+[data-bg="plain"] #scene { display: none; }
+#scene .land { position: absolute; inset: 0; width: 100%; height: 100%; }
+[data-theme="dark"] #scene .flowers { opacity: .35; }
+.bf { position: absolute; left: 0; top: 0; will-change: transform; filter: drop-shadow(0 6px 6px rgba(160, 60, 100, .22)); }
+.bf .bob { display: block; width: 100%; overflow: visible; animation: bf-bob 3s ease-in-out infinite alternate; }
+.bf .wing { transform-origin: 0 0; animation: bf-flap .6s ease-in-out infinite alternate; stroke-width: .6; }
+.bf .vein { fill: none; stroke: rgba(255, 255, 255, .55); stroke-width: .9; }
+@keyframes bf-flap { from { transform: scaleX(1); } to { transform: scaleX(.18); } }
+@keyframes bf-bob { from { transform: translateY(-9px) rotate(-4deg); } to { transform: translateY(9px) rotate(5deg); } }
+@media (prefers-reduced-motion: reduce) { .bf, .bf .bob, .bf .wing { animation-play-state: paused !important; } }
+/* cards let the backdrop show through a little, so butterflies passing behind stay visible */
+[data-bg="nature"] :is(.card, .tile, .quick, .chip, .btn.ghost) { background: color-mix(in srgb, var(--surface) 84%, transparent); }

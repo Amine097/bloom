@@ -26,6 +26,7 @@ export function render() {
           <div class="card-b">
             ${field("Your name", input("name", s.name, 'data-change="setText" placeholder="Shown on the dashboard"'))}
             ${field("Appearance", `<select data-change="setText" name="theme">${[["auto", "Follow the Mac"], ["light", "Light"], ["dark", "Dark"]].map(([v, l]) => `<option value="${v}" ${s.theme === v ? "selected" : ""}>${l}</option>`).join("")}</select>`)}
+            ${field("Background", `<select data-change="setText" name="background">${[["nature", "Meadow with butterflies"], ["plain", "Plain"]].map(([v, l]) => `<option value="${v}" ${s.background === v ? "selected" : ""}>${l}</option>`).join("")}</select>`)}
           </div>
         </section>
         <section class="card"><div class="card-h"><h3>Semester and recalls</h3></div>

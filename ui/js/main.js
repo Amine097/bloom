@@ -8,6 +8,7 @@ import * as deadlines from "./views/deadlines.js";
 import * as courses from "./views/courses.js";
 import * as settings from "./views/settings.js";
 import { planner, notebook } from "./views/soon.js";
+import { mountScene } from "./scene.js";
 
 const VIEWS = {
   dashboard: { label: "Dashboard", icon: "home", mod: dashboard },
@@ -32,6 +33,7 @@ function applyTheme() {
   const t = D.settings.theme;
   const dark = t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.dataset.theme = dark ? "dark" : "light";
+  document.documentElement.dataset.bg = D.settings.background === "plain" ? "plain" : "nature";
 }
 
 function renderNav() {
@@ -166,6 +168,7 @@ async function start() {
   onSaveError(e => toast("Could not save: " + (e?.message || e), "error"));
   bindEvents();
   todo.bindDrag($("#main"));
+  mountScene();
   if (inApp) {
     try { app.version = await window.__TAURI__.app.getVersion(); } catch { /* shown as blank */ }
   }
