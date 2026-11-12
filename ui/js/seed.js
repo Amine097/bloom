@@ -56,14 +56,14 @@ export function seedData() {
   const add = (module, list) => list.forEach(([title, date], i) => {
     items[`${module}-${String(i + 1).padStart(2, "0")}`] = {
       kind: "lecture", module, title, week: null, date: date || null, notes: "", order: i,
-      seenAt: null, quizzedAt: null, recall1At: null, recall2At: null, recallDue: null, doneAt: null,
+      seenAt: null, quizzedAt: null, recall1At: null, recall2At: null, recallDue: null, doneAt: null, pdf: null,
     };
   });
   add("heart", HEART);
   add("cns", CNS);
 
   return {
-    version: 1,
+    version: 2,
     settings: { name: "", semesterStart: "2026-09-14", recall1: 7, recall2: 14, maxRecallsPerDay: 4, theme: "auto", background: "nature", welcomed: false },
     modules,
     items,

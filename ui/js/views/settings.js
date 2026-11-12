@@ -40,8 +40,8 @@ export function render() {
             <p class="muted small">When a module has an exam date, its recalls are brought forward so the last one falls before the exam.</p>
           </div>
         </section>
-        <section class="card"><div class="card-h"><h3>Assistant</h3><span class="grow"></span><span class="pill">not set up</span></div>
-          <div class="card-b"><p class="muted">The Planner and the Notebook will use your own Claude account. Nothing to do here yet.</p></div>
+        <section class="card"><div class="card-h"><h3>Assistant</h3></div>
+          <div class="card-b"><p class="muted">The Notebook uses Claude Code on this Mac, signed in with your own Claude account, to write study guides and quizzes from your lecture PDFs. Claude Code needs to be installed and signed in once, from Terminal.</p></div>
         </section>
       </div>
       <div class="col">
@@ -51,6 +51,7 @@ export function render() {
         <section class="card"><div class="card-h"><h3>Your data</h3></div>
           <div class="card-b">
             <p class="muted">Everything stays on this Mac. Bloom keeps a backup for each of the last 14 days it was used, and updates never touch your data.</p>
+            <p class="muted small">Lecture PDFs are kept on this Mac as well, but they are not included in backup copies.</p>
             <div class="btns">
               <button class="btn soft" data-act="export">Save a backup copy</button>
               <label class="btn ghost">Restore from a backup<input type="file" accept=".json,application/json" data-change="import" hidden></label>

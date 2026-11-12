@@ -28,6 +28,8 @@ const PATHS = {
   arrow: "M7 17L17 7M9 7h8v8",
   dots: "M6 12h.01M12 12h.01M18 12h.01",
   grip: "M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01",
+  file: "M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 17h6",
+  clip: "M20 11.5l-8.3 8.3a5 5 0 01-7-7L13 4.5a3.3 3.3 0 014.7 4.7l-8.2 8.2a1.7 1.7 0 01-2.4-2.4L14.5 7.6",
 };
 export const icon = (name, size = 18) =>
   `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${PATHS[name]}"/></svg>`;
@@ -84,9 +86,37 @@ export function confirmBox(title, message, okLabel = "Delete") {
   });
 }
 
+let viewerUrl = null;
+
+/** Shows a PDF over the whole window. `url` is an object URL; it is released when the viewer closes. */
+export function openViewer(title, url) {
+  closeViewer();
+  viewerUrl = url;
+  $("#viewer").innerHTML = `
+    <div class="viewer" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+      <header><b>${esc(title)}</b><button type="button" class="iconbtn" data-viewer="close" aria-label="Close">${icon("close")}</button></header>
+      <iframe src="${url}" title="${esc(title)}"></iframe>
+    </div>`;
+  $("#viewer").hidden = false;
+  $("#viewer button").focus();
+}
+
+export function closeViewer() {
+  $("#viewer").hidden = true;
+  $("#viewer").innerHTML = "";
+  if (viewerUrl) URL.revokeObjectURL(viewerUrl);
+  viewerUrl = null;
+}
+
 /** Wired once by main.js. */
 export function bindModal() {
   const root = $("#modal");
+  $("#viewer").addEventListener("click", e => {
+    if (e.target.closest("[data-viewer]") || e.target === $("#viewer")) closeViewer();
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && !$("#viewer").hidden) { e.stopImmediatePropagation(); closeViewer(); }
+  });
   root.addEventListener("submit", async e => {
     e.preventDefault();
     const h = modalHandlers;

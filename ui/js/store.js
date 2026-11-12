@@ -26,7 +26,9 @@ function migrate(data) {
   data.todo ??= {};
   data.todo.projects ??= {};
   data.todo.tasks ??= {};
-  data.version = 1;
+  // v2: a lecture can carry one PDF, { id, name, size, addedAt }; the file itself is in files.js
+  for (const it of Object.values(data.items)) it.pdf ??= null;
+  data.version = 2;
   return data;
 }
 

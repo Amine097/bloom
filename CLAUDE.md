@@ -74,5 +74,11 @@ The updater signing key is in `~/.tauri/bloom.key` (never commit it) and in the 
   Recall 1 is due 7 days after "seen"; recall 2 is due 14 days after recall 1 was done.
   Both shrink when the module's exam is close (`ui/js/recall.js`).
 - Recalls and deadlines do not appear in the To-do view.
-- Planner and Notebook are placeholders. They will call the Claude Code CLI installed on her Mac,
-  with her own account, as a hidden background process.
+- A lecture can carry one PDF: `item.pdf` is `{ id, name, size, addedAt }` or `null`. The file is
+  Bloom's own copy, `pdfs/<id>.pdf` beside the data file (IndexedDB in the browser preview), all
+  through `ui/js/files.js`. PDFs are not part of the daily backups or the exported backup copy.
+- The Notebook makes a study guide and a quiz from a lecture's PDF, kept in `D.notebook[itemId]`.
+  It calls the Claude Code CLI installed on her Mac, with her own account, as a hidden background
+  process: `ask_claude` in the native shell, `POST /api/ask` of `scripts/preview.mjs` in the
+  browser preview. Prompts and answer checking are in `ui/js/notebook-core.js`.
+- The Planner is a placeholder. It will call the Claude Code CLI the same way.

@@ -7,7 +7,8 @@ import * as todo from "./views/todo.js";
 import * as deadlines from "./views/deadlines.js";
 import * as courses from "./views/courses.js";
 import * as settings from "./views/settings.js";
-import { planner, notebook } from "./views/soon.js";
+import * as notebook from "./views/notebook.js";
+import { planner } from "./views/soon.js";
 import { mountScene } from "./scene.js";
 
 const VIEWS = {

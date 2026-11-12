@@ -1,4 +1,4 @@
-// Planner and Notebook: not built yet. These pages say what is coming.
+// Planner: not built yet. This page says what is coming.
 import { icon } from "../ui.js";
 
 const page = (ic, title, lead, points) => `<header class="page-h"><div><h1>${title}</h1></div></header>
@@ -14,15 +14,6 @@ export const planner = {
     "Bloom reads your lectures, recalls, deadlines and to-dos",
     "It proposes a week that fits, and you adjust it",
     "It runs on your own Claude account",
-  ]),
-  actions: {},
-};
-
-export const notebook = {
-  render: () => page("note", "Notebook", "Ask questions about your own course material.", [
-    "Add your slides and papers as sources",
-    "Get answers that point to the page they come from",
-    "Summaries, study guides and practice questions",
   ]),
   actions: {},
 };

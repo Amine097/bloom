@@ -2,7 +2,10 @@
 import { D, save, uid, currentWeek, itemWeek, isLecture, itemsList, modulesSorted, moduleOf, pendingRecalls } from "../store.js";
 import { today, fmtWday, weekLabel, relDay, weekOf } from "../dates.js";
 import { stateOf, setStep, LABEL } from "../recall.js";
-import { esc, icon, app, openModal, confirmBox, field, input, select, cvar, toast } from "../ui.js";
+import { esc, icon, app, openModal, openViewer, confirmBox, field, input, select, cvar, toast } from "../ui.js";
+import { storePdf, pdfUrl, removePdf, fmtSize } from "../files.js";
+
+const PDF_ACCEPT = 'accept="application/pdf,.pdf"';
 
 const view = { module: "all", hideDone: false };
 
@@ -31,12 +34,16 @@ function row(it, recalls) {
   const control = lecture
     ? stepper(it.id, it)
     : `<button class="check ${it.doneAt ? "on" : ""}" data-act="toggleItem" data-id="${it.id}" aria-label="Done" aria-pressed="${Boolean(it.doneAt)}">${icon("check", 14)}</button>`;
+  const pdf = !lecture ? ""
+    : it.pdf ? `<button class="iconbtn pdf" data-act="openPdf" data-id="${it.id}" title="Open ${esc(it.pdf.name)}" aria-label="Open the lecture PDF">${icon("file", 17)}</button>`
+    : `<label class="iconbtn pdf none" title="Attach the lecture PDF">${icon("clip", 17)}<input type="file" ${PDF_ACCEPT} data-change="attachPdf" data-id="${it.id}" aria-label="Attach the lecture PDF" hidden></label>`;
   return `<div class="row item ${lecture ? "" : "is-task"} ${!lecture && it.doneAt ? "done" : ""}" ${cvar(m.color)}>
     <span class="dot"></span>
     <button class="row-main" data-act="edit" data-id="${it.id}">
       <span class="t">${esc(it.title)}</span>
       <span class="sub">${esc(m.name)}${lecture ? "" : " · task"}${it.notes ? " · " + esc(it.notes.slice(0, 60)) : ""} ${recallBadge(recalls[it.id])}</span>
     </button>
+    ${pdf}
     ${it.date ? "" : select("week", weekOptions, it.week, `class="mini" data-change="setWeek" data-id="${it.id}" aria-label="Week"`)}
     <input type="date" class="mini ${it.date ? "" : "empty"}" value="${it.date || ""}" data-change="setDate" data-id="${it.id}" aria-label="Date taught">
     ${control}
@@ -113,6 +120,9 @@ function editForm(it) {
       ${field("Week", input("week", it.week, 'type="number" min="1" max="60" placeholder="if there is no date"'))}
     </div>
     ${field("Notes", `<textarea name="notes" rows="2">${esc(it.notes || "")}</textarea>`)}
+    ${lecture ? field("Lecture PDF", `<input type="file" name="pdfFile" ${PDF_ACCEPT}>`,
+      it.pdf ? `Attached: ${it.pdf.name} (${fmtSize(it.pdf.size)}). Choosing a file replaces it.` : "One PDF per lecture. Bloom keeps its own copy.") : ""}
+    ${lecture && it.pdf ? `<label class="switch"><input type="checkbox" name="pdfRemove"> Remove the attached PDF</label>` : ""}
     ${dates}`;
 }
 
@@ -124,10 +134,27 @@ function openEditor(id) {
     danger: id && { label: "Delete", onClick: async () => {
       if (!await confirmBox("Delete this?", `"${it.title}" and its progress will be removed.`)) return;
       delete D.items[id];
+      delete D.notebook[id];
       save(); app.refresh();
+      if (it.pdf) removePdf(it.pdf.id);
     } },
-    onSubmit: v => {
-      const target = id ? D.items[id] : (D.items[uid()] = { order: Date.now(), seenAt: null, quizzedAt: null, recall1At: null, recall2At: null, recallDue: null, doneAt: null });
+    onSubmit: async (v, form) => {
+      let pdf = null;
+      if (v.pdfFile?.size && v.kind === "lecture") {
+        const button = form.querySelector('[type="submit"]');
+        button.disabled = true;
+        try { pdf = await storePdf(v.pdfFile); }
+        catch (e) { toast(e.message, "error"); return false; }
+        finally { button.disabled = false; }
+      }
+      const target = id ? D.items[id] : (D.items[uid()] = { order: Date.now(), seenAt: null, quizzedAt: null, recall1At: null, recall2At: null, recallDue: null, doneAt: null, pdf: null });
+      const oldPdf = target.pdf;
+      if (pdf) target.pdf = pdf;
+      else if (v.pdfRemove) target.pdf = null;
+      if (oldPdf && target.pdf !== oldPdf) {
+        removePdf(oldPdf.id);
+        if (id) delete D.notebook[id]; // its study guide and quiz were written from the old PDF
+      }
       Object.assign(target, {
         title: v.title.trim(), kind: v.kind, module: v.module || null,
         date: v.date || null, week: v.week ? Number(v.week) : null, notes: v.notes.trim(),
@@ -161,6 +188,23 @@ export const actions = {
     const it = D.items[el.dataset.id];
     it.doneAt = it.doneAt ? null : today();
     save(); app.refresh();
+  },
+  attachPdf: async el => {
+    const file = el.files[0];
+    if (!file) return;
+    let pdf;
+    try { pdf = await storePdf(file); }
+    catch (e) { toast(e.message, "error"); el.value = ""; return; }
+    const it = D.items[el.dataset.id];
+    if (!it) { removePdf(pdf.id); return; }
+    it.pdf = pdf;
+    save(); app.refresh();
+    toast("PDF attached 📎");
+  },
+  openPdf: async el => {
+    const it = D.items[el.dataset.id];
+    try { openViewer(it.title, await pdfUrl(it.pdf.id)); }
+    catch { toast("This PDF could not be opened. Attach it again from the lecture.", "error"); }
   },
   setDate: el => {
     const it = D.items[el.dataset.id];
