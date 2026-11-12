@@ -1,11 +1,12 @@
 //! Native shell for Bloom. The interface (ui/) does all the work; this side only owns the data
-//! file (load, atomic save, one backup per day, export to the Downloads folder) and the lecture
-//! PDFs stored beside it in `pdfs/`.
+//! file (load, atomic save, one backup per day, export to the Downloads folder), the lecture
+//! PDFs stored beside it in `pdfs/`, and running the Claude Code CLI (install, sign-in, asking).
 
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
@@ -151,15 +152,31 @@ const CLAUDE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// Runs `cmd` with `input` on stdin. Returns None when it ran past `timeout` (it is then killed).
 /// stdout and stderr are read on their own threads so a large output cannot block the child.
 fn run_with_timeout(
+    cmd: Command,
+    input: &[u8],
+    timeout: Duration,
+) -> Result<Option<(ExitStatus, Vec<u8>, Vec<u8>)>, std::io::Error> {
+    run_tracked(cmd, input, timeout, None)
+}
+
+/// `run_with_timeout`, which also keeps the child's pid in `pid_slot` once it has started, so it
+/// can be stopped from elsewhere. The caller clears the slot afterwards.
+fn run_tracked(
     mut cmd: Command,
     input: &[u8],
     timeout: Duration,
+    pid_slot: Option<&Mutex<Option<u32>>>,
 ) -> Result<Option<(ExitStatus, Vec<u8>, Vec<u8>)>, std::io::Error> {
     let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
+    if let Some(slot) = pid_slot {
+        if let Ok(mut pid) = slot.lock() {
+            *pid = Some(child.id());
+        }
+    }
     let mut out_pipe = child.stdout.take();
     let mut err_pipe = child.stderr.take();
     let out_reader = thread::spawn(move || {
@@ -176,10 +193,16 @@ fn run_with_timeout(
         }
         buf
     });
+    // A tracked process (the sign-in) keeps its stdin open until it ends, so it waits for the
+    // browser instead of reading an empty answer. Otherwise stdin is closed once the input is
+    // written, so the CLI knows the prompt is complete.
+    let mut held_stdin: Option<std::process::ChildStdin> = None;
     if let Some(mut stdin) = child.stdin.take() {
         // a write error shows up as a failed run below
         let _ = stdin.write_all(input);
-        // stdin is closed here, so the CLI knows the prompt is complete
+        if pid_slot.is_some() {
+            held_stdin = Some(stdin);
+        }
     }
 
     let started = Instant::now();
@@ -194,6 +217,7 @@ fn run_with_timeout(
         }
         thread::sleep(Duration::from_millis(250));
     };
+    drop(held_stdin);
     let out = out_reader.join().unwrap_or_default();
     let err = err_reader.join().unwrap_or_default();
     Ok(Some((status, out, err)))
@@ -335,6 +359,197 @@ async fn ask_claude(app: AppHandle, pdf_id: String, prompt: String) -> Result<St
     .map_err(|e| e.to_string())?
 }
 
+// ---- setting up Claude Code from Settings: install, sign in, status
+
+const STATUS_TIMEOUT: Duration = Duration::from_secs(15);
+const INSTALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const LOGIN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+/// The pid of the running `claude auth login`, so the sign-in can be cancelled.
+static LOGIN_PID: Mutex<Option<u32>> = Mutex::new(None);
+
+/// Drops terminal colour codes (ESC ... letter) from a process's output.
+fn strip_ansi(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            for d in chars.by_ref() {
+                if d.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// The last few lines of a process's output, at most `max` characters, for an error message.
+fn tail_text(bytes: &[u8], max: usize) -> String {
+    let text = strip_ansi(&String::from_utf8_lossy(bytes));
+    let lines: Vec<&str> = text.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+    let start = lines.len().saturating_sub(3);
+    let detail = lines[start..].join(" ");
+    let count = detail.chars().count();
+    if count > max {
+        // keep the end, where the reason usually is
+        detail.chars().skip(count - max).collect()
+    } else {
+        detail
+    }
+}
+
+/// Reads what `claude auth status` printed. Anything that is not its JSON counts as signed out.
+fn read_auth_status(out: &[u8]) -> serde_json::Value {
+    let text = String::from_utf8_lossy(out).into_owned();
+    let parsed: serde_json::Value = serde_json::from_str::<serde_json::Value>(text.trim())
+        .ok()
+        .filter(|v| v.is_object())
+        .unwrap_or(serde_json::Value::Null);
+    let logged_in = parsed.get("loggedIn").and_then(|v| v.as_bool()).unwrap_or(false);
+    let email: Option<String> = parsed.get("email").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let plan: Option<String> = parsed
+        .get("subscriptionType")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    serde_json::json!({
+        "installed": true,
+        "loggedIn": logged_in,
+        "email": email,
+        "plan": plan
+    })
+}
+
+/// `{"installed": false}`, or `{"installed": true, "loggedIn", "email", "plan"}`.
+#[tauri::command]
+async fn claude_status() -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
+        let Some(bin) = find_claude() else {
+            return Ok(serde_json::json!({ "installed": false }));
+        };
+        let mut cmd = Command::new(&bin);
+        cmd.args(["auth", "status"]).env("PATH", child_path(&bin));
+        // signed out may end with a non-zero exit code, so only the printed JSON counts
+        match run_with_timeout(cmd, b"", STATUS_TIMEOUT) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(serde_json::json!({ "installed": false })),
+            Err(e) => Err(format!("Could not start Claude Code: {e}")),
+            Ok(None) => Err("Claude Code did not answer in time. Try again.".into()),
+            Ok(Some((_status, out, _err))) => Ok(read_auth_status(&out)),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Installs Claude Code with Anthropic's official installer (into ~/.local/bin).
+#[tauri::command]
+async fn claude_install() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let mut cmd = Command::new("/bin/bash");
+        cmd.args(["-lc", "curl -fsSL https://claude.ai/install.sh | bash"])
+            .env("PATH", child_path(Path::new("/bin/bash")));
+        match run_with_timeout(cmd, b"", INSTALL_TIMEOUT) {
+            Err(e) => Err(format!("Could not start the installer: {e}")),
+            Ok(None) => Err("The installation took longer than 10 minutes and was stopped. Check the internet connection and try again.".into()),
+            Ok(Some((status, out, err))) => {
+                if status.success() && find_claude().is_some() {
+                    return Ok(());
+                }
+                let mut detail = tail_text(&err, 300);
+                if detail.is_empty() {
+                    detail = tail_text(&out, 300);
+                }
+                let code = status.code().map(|c| format!(" (exit code {c})")).unwrap_or_default();
+                Err(format!("Claude could not be installed{code}. {detail}").trim().to_string())
+            }
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Signs in with her Claude subscription: the CLI opens the browser and waits for it.
+#[tauri::command]
+async fn claude_login() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let bin = find_claude().ok_or_else(|| "no-claude".to_string())?;
+        let mut cmd = Command::new(&bin);
+        cmd.args(["auth", "login", "--claudeai"]).env("PATH", child_path(&bin));
+        let result = run_tracked(cmd, b"", LOGIN_TIMEOUT, Some(&LOGIN_PID));
+        if let Ok(mut pid) = LOGIN_PID.lock() {
+            *pid = None;
+        }
+        match result {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err("no-claude".into()),
+            Err(e) => Err(format!("Could not start the sign-in: {e}")),
+            Ok(None) => Err("The sign-in was not finished within 5 minutes and was stopped. Try again.".into()),
+            Ok(Some((status, out, err))) => {
+                if status.success() {
+                    return Ok(());
+                }
+                let mut detail = tail_text(&err, 300);
+                if detail.is_empty() {
+                    detail = tail_text(&out, 300);
+                }
+                Err(format!("The sign-in did not finish. {detail}").trim().to_string())
+            }
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Stops a running `claude_login`. Does nothing when none is running.
+#[tauri::command]
+async fn claude_login_cancel() -> Result<(), String> {
+    let pid: Option<u32> = match LOGIN_PID.lock() {
+        Ok(guard) => *guard,
+        Err(_) => None,
+    };
+    if let Some(pid) = pid {
+        tauri::async_runtime::spawn_blocking(move || {
+            let _ = Command::new("/bin/kill").arg(pid.to_string()).status();
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// The fallback sign-in: a small script opened in Terminal, which runs the CLI's own sign-in.
+#[tauri::command]
+async fn claude_login_terminal() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let bin = find_claude().ok_or_else(|| "no-claude".to_string())?;
+        // single-quoted for the shell, with any ' inside written as '\''
+        let quoted = format!("'{}'", bin.to_string_lossy().replace('\'', "'\\''"));
+        let script = format!(
+            "#!/bin/zsh\n{quoted} auth login --claudeai\necho\necho \"Done. You can close this window and go back to Bloom.\"\n"
+        );
+        let file = std::env::temp_dir().join("bloom-sign-in.command");
+        fs::write(&file, script).map_err(|e| format!("Could not prepare the sign-in: {e}"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&file, fs::Permissions::from_mode(0o755))
+                .map_err(|e| format!("Could not prepare the sign-in: {e}"))?;
+        }
+        let status = Command::new("/usr/bin/open")
+            .arg(&file)
+            .status()
+            .map_err(|e| format!("Could not open Terminal: {e}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err("Could not open Terminal.".into())
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -347,7 +562,12 @@ pub fn run() {
             save_pdf,
             read_pdf,
             delete_pdf,
-            ask_claude
+            ask_claude,
+            claude_status,
+            claude_install,
+            claude_login,
+            claude_login_cancel,
+            claude_login_terminal
         ])
         .run(tauri::generate_context!())
         .expect("error while running Bloom");

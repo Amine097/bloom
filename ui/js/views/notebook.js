@@ -4,7 +4,7 @@ import { today, relDay } from "../dates.js";
 import { setStep } from "../recall.js";
 import { esc, icon, app, openViewer, confirmBox, cvar, toast } from "../ui.js";
 import { pdfUrl } from "../files.js";
-import { askAboutPdf } from "../assistant.js";
+import { askAboutPdf, assistantStatus } from "../assistant.js";
 import { guidePrompt, quizPrompt, parseGuide, parseQuiz, shuffleOptions } from "../notebook-core.js";
 
 const QUESTIONS = 8;
@@ -14,7 +14,8 @@ const LETTERS = ["A", "B", "C", "D"];
 const view = { sel: null, tab: "guide", play: null };
 /** "<lectureId>:guide" or "<lectureId>:quiz" while Claude is working on it. */
 const running = new Set();
-let missingClaude = false;
+/** null, or why Claude cannot be used yet: "missing" (not installed) or "signedout". */
+let setup = null;
 
 const KIND = {
   guide: { name: "study guide", prompt: guidePrompt, parse: parseGuide },
@@ -158,9 +159,12 @@ export function render() {
   const it = all.find(x => x.id === view.sel);
   const m = moduleOf(it);
 
-  const warn = missingClaude ? `<section class="card nb-warn"><div class="card-b">
-      <p><b>Claude Code is needed for the Notebook.</b></p>
-      <p class="muted">The Notebook uses Claude Code, the Claude app for the Terminal, installed and signed in on this Mac with your own Claude account. Install it from claude.com/claude-code, open Terminal, type <span class="mono">claude</span>, sign in once, then try again here.</p>
+  const warn = setup ? `<section class="card nb-warn"><div class="card-b">
+      <p><b>${setup === "missing" ? "Claude is not set up yet." : "Claude is not signed in."}</b></p>
+      <p class="muted">${setup === "missing"
+        ? "The Notebook uses Claude, with your own Claude account, to write study guides and quizzes. Setting it up takes a minute, in Settings."
+        : "The Notebook uses Claude with your own Claude account. Sign in once in Settings, then try again here."}</p>
+      <div class="btns"><button class="btn primary small" data-act="goSettings">Set up in Settings</button></div>
     </div></section>` : "";
 
   return `${head}
@@ -195,9 +199,16 @@ async function generate(id, kind) {
   running.add(key);
   refreshIfHere();
   try {
+    // do not start when Claude is not set up; a failed check does not block (the run reports its own errors)
+    const s = await assistantStatus().catch(() => null);
+    if (s && !s.loggedIn) {
+      setup = s.installed ? "signedout" : "missing";
+      return;
+    }
+    if (s) setup = null;
     const text = await askAboutPdf(pdfId, KIND[kind].prompt(it.title));
     const data = KIND[kind].parse(text);
-    missingClaude = false;
+    setup = null;
     const now = D.items[id];
     if (!now || now.pdf?.id !== pdfId) return; // the lecture or its PDF changed meanwhile
     const nb = (D.notebook[id] ??= {});
@@ -207,7 +218,7 @@ async function generate(id, kind) {
     toast(`The ${KIND[kind].name} for "${now.title}" is ready 🌸`);
   } catch (e) {
     if (e?.code === "no-claude") {
-      missingClaude = true;
+      setup = "missing";
       toast("Claude Code is not installed on this Mac.", "error");
     } else toast(e?.message || String(e), "error");
   } finally {
@@ -220,6 +231,7 @@ export const actions = {
   select: el => { view.sel = el.dataset.id; app.refresh(); },
   tab: el => { view.tab = el.dataset.tab; app.refresh(); },
   goCourses: () => app.go("courses"),
+  goSettings: () => app.go("settings"),
   generate: async el => {
     const id = view.sel, kind = el.dataset.kind;
     if (isRunning(id, kind)) return;

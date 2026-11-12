@@ -1,6 +1,6 @@
 // Serves ui/ on http://localhost:4173 so the interface can be developed in a normal browser.
 // It also answers POST /api/ask, which runs the local Claude Code CLI on a lecture PDF, the way the
-// native shell does in the app (see ask_claude in src-tauri/src/lib.rs).
+// native shell does in the app (see ask_claude in src-tauri/src/lib.rs), and GET /api/claude-status.
 import { createServer } from "node:http";
 import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
@@ -53,14 +53,50 @@ function runClaude(cwd, prompt) {
   });
 }
 
-async function ask(req, res) {
-  const send = (status, body) => {
-    res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
-    res.end(JSON.stringify(body));
-  };
-  // only the page served here may ask: a custom header forces a CORS preflight, which is never granted
+function sendJson(res, status, body) {
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+  res.end(JSON.stringify(body));
+}
+
+/** Only the page served here may use the API: a custom header forces a CORS preflight, which is never granted. */
+function allowed(req) {
   const host = String(req.headers.host || "");
-  if (req.headers["x-bloom-ask"] !== "1" || !/^(localhost|127\.0\.0\.1):\d+$/.test(host)) return send(403, { error: "Forbidden" });
+  return req.headers["x-bloom-ask"] === "1" && /^(localhost|127\.0\.0\.1):\d+$/.test(host);
+}
+
+/** Runs `claude auth status`; same shape as claude_status in src-tauri/src/lib.rs. */
+function claudeStatus() {
+  return new Promise((resolve, reject) => {
+    const child = spawn("claude", ["auth", "status"], { stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+    let out = "";
+    const timer = setTimeout(() => child.kill(), 15_000);
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", c => { out += c; });
+    child.on("error", e => {
+      clearTimeout(timer);
+      if (e.code === "ENOENT") resolve({ installed: false });
+      else reject(e);
+    });
+    // signed out may end with a non-zero exit code, so only the printed JSON counts
+    child.on("close", () => {
+      clearTimeout(timer);
+      let s = null;
+      try { s = JSON.parse(out.trim()); } catch { /* not JSON: signed out */ }
+      const str = v => (typeof v === "string" ? v : null);
+      resolve({ installed: true, loggedIn: s?.loggedIn === true, email: str(s?.email), plan: str(s?.subscriptionType) });
+    });
+  });
+}
+
+async function status(req, res) {
+  if (!allowed(req)) return sendJson(res, 403, { error: "Forbidden" });
+  try { sendJson(res, 200, await claudeStatus()); }
+  catch (e) { sendJson(res, 500, { error: e.message || String(e) }); }
+}
+
+async function ask(req, res) {
+  const send = (code, body) => sendJson(res, code, body);
+  if (!allowed(req)) return send(403, { error: "Forbidden" });
   let dir = null;
   try {
     const body = await readBody(req);
@@ -84,6 +120,10 @@ createServer(async (req, res) => {
   const path = decodeURIComponent(new URL(req.url, "http://x").pathname);
   if (path === "/api/ask") {
     if (req.method === "POST") return ask(req, res);
+    res.writeHead(405).end(); return;
+  }
+  if (path === "/api/claude-status") {
+    if (req.method === "GET") return status(req, res);
     res.writeHead(405).end(); return;
   }
   const file = normalize(join(root, path === "/" ? "index.html" : path));

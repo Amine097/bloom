@@ -1,9 +1,187 @@
-// Settings: semester, recall timings, modules and exam dates, backups, updates.
+// Settings: semester, recall timings, setting up Claude, modules and exam dates, backups, updates.
 import { D, save, uid, modulesSorted, itemsList, exportBackup, replaceAll } from "../store.js";
 import { fmtWday, relDay, parse } from "../dates.js";
 import { esc, icon, app, openModal, confirmBox, field, input, cvar, toast, COLORS } from "../ui.js";
+import { assistantStatus, installClaude, signIn, cancelSignIn, signInWithTerminal } from "../assistant.js";
+
+// ---- the Assistant card: installing Claude Code and signing in, without Terminal
+
+/**
+ * Survives changes of view. `status` is the last answer of assistantStatus() (null until the
+ * first one); `busy` is "install" or "signin" while that is going on; `attempt` tells a sign-in
+ * that was cancelled or replaced apart from the current one.
+ */
+const claude = { status: null, checking: false, checkedAt: 0, error: "", busy: null, via: "browser", terminalFirst: false, attempt: 0, poll: null, pollUntil: 0 };
+const RECHECK_MS = 30_000;
+const POLL_MS = 3_000;
+const POLL_FOR_MS = 5 * 60_000;
+
+/** Re-renders only when Settings is on screen. */
+const refreshIfHere = () => { if (document.getElementById("main")?.dataset.view === "settings") app.refresh(); };
+
+async function checkStatus() {
+  if (claude.checking) return;
+  claude.checking = true;
+  try {
+    claude.status = await assistantStatus();
+    if (claude.status.loggedIn) claude.error = "";
+  } catch (e) {
+    if (!claude.status) claude.error = e?.message || String(e);
+  } finally {
+    claude.checking = false;
+    claude.checkedAt = Date.now();
+    refreshIfHere();
+  }
+}
+
+function stopPolling() {
+  clearInterval(claude.poll);
+  claude.poll = null;
+}
+
+function connected(status) {
+  stopPolling();
+  claude.attempt += 1; // a sign-in still running in the background no longer matters
+  Object.assign(claude, { status, busy: null, error: "", terminalFirst: false, checkedAt: Date.now() });
+  toast("Claude is connected 🌸");
+  refreshIfHere();
+}
+
+/** While she signs in elsewhere, asks every few seconds whether it is done. */
+function startPolling() {
+  stopPolling();
+  claude.pollUntil = Date.now() + POLL_FOR_MS;
+  let asking = false;
+  claude.poll = setInterval(async () => {
+    if (Date.now() > claude.pollUntil) {
+      stopPolling();
+      claude.attempt += 1;
+      Object.assign(claude, { busy: null, error: "The sign-in was not finished in time. Try again." });
+      refreshIfHere();
+      return;
+    }
+    if (asking) return;
+    asking = true;
+    try {
+      const s = await assistantStatus();
+      if (s.loggedIn && claude.poll) connected(s);
+    } catch { /* try again on the next tick */ }
+    finally { asking = false; }
+  }, POLL_MS);
+}
+
+const planText = plan => (plan ? `${plan[0].toUpperCase()}${plan.slice(1)} plan` : "");
+
+/** The Assistant card for the current state. Every string from the CLI goes through esc(). */
+function assistantCard() {
+  const s = claude.status;
+  const head = pill => `<div class="card-h"><h3>Assistant</h3><span class="grow"></span>${pill}</div>`;
+  const working = text => `<p class="as-working"><span class="nb-spin small" aria-hidden="true"></span> ${text}</p>`;
+  const error = claude.error ? `<p class="as-error">${esc(claude.error)}</p>` : "";
+  const card = (pill, body) => `<section class="card" aria-live="polite">${head(pill)}<div class="card-b">${body}</div></section>`;
+
+  if (!s) {
+    if (!claude.error) return card("", working("Checking…"));
+    return card("", `<p class="muted">Bloom could not check whether Claude is set up.</p>${error}
+      <div class="btns"><button class="btn ghost small" data-act="claudeCheck">Check again</button></div>`);
+  }
+
+  if (!s.installed) {
+    const intro = `<p class="muted">Bloom uses Claude to write study guides and quizzes. It needs a small helper from Anthropic, installed once.</p>`;
+    if (claude.busy === "install") return card(`<span class="pill">not set up</span>`, `${intro}${working("Installing… this can take a minute")}`);
+    return card(`<span class="pill">not set up</span>`, `${intro}${error}
+      <div class="btns"><button class="btn primary" data-act="claudeInstall">${icon("spark", 16)} Set up Claude</button></div>`);
+  }
+
+  if (!s.loggedIn) {
+    const pill = `<span class="pill">not signed in</span>`;
+    if (claude.busy === "signin") {
+      const where = claude.via === "terminal"
+        ? "A Terminal window has opened. Follow the steps there to sign in to Claude, then come back here."
+        : "Your browser has opened. Sign in to Claude there, then come back here.";
+      return card(pill, `${working(where)}
+        <div class="btns as-btns"><button class="btn ghost small" data-act="claudeCancel">Cancel</button>
+          ${claude.via === "terminal" ? "" : `<button class="link" data-act="claudeTerminal">Nothing opened? Sign in through Terminal</button>`}</div>`);
+    }
+    const terminal = claude.terminalFirst
+      ? `<button class="btn soft" data-act="claudeTerminal">Sign in through Terminal</button>`
+      : `<button class="link" data-act="claudeTerminal">Nothing opens? Sign in through Terminal</button>`;
+    return card(pill, `<p class="muted">Bloom uses Claude to write study guides and quizzes, with your own Claude account. Sign in once and it stays signed in.</p>${error}
+      <div class="btns as-btns"><button class="btn ${claude.terminalFirst ? "ghost" : "primary"}" data-act="claudeSignIn">Sign in to Claude</button>${terminal}</div>`);
+  }
+
+  const who = [s.email ? `<b>${esc(s.email)}</b>` : "", esc(planText(s.plan))].filter(Boolean).join(" · ");
+  return card(`<span class="pill ok">${icon("check", 13)} connected</span>`,
+    `<p class="muted">Study guides and quizzes in the Notebook are written by Claude, with your own Claude account.</p>
+    ${who ? `<p>${who}</p>` : ""}
+    <div class="btns"><button class="btn ghost small" data-act="claudeCheck">${claude.checking ? '<span class="nb-spin small" aria-hidden="true"></span> ' : ""}Check again</button></div>`);
+}
+
+/** Starts a sign-in `via` "browser" or "terminal", and waits for the status to say it is done. */
+async function beginSignIn(via) {
+  const attempt = ++claude.attempt;
+  Object.assign(claude, { busy: "signin", via, error: "" });
+  app.refresh();
+  startPolling();
+  try {
+    if (via === "terminal") {
+      await cancelSignIn().catch(() => {}); // only one sign-in at a time
+      await signInWithTerminal();
+      return; // the polling notices when she is done
+    }
+    await signIn();
+  } catch (e) {
+    if (attempt !== claude.attempt) return; // cancelled or replaced meanwhile
+    const s = await assistantStatus().catch(() => null);
+    if (attempt !== claude.attempt) return;
+    if (s?.loggedIn) { connected(s); return; }
+    stopPolling();
+    Object.assign(claude, { busy: null, error: e?.message || String(e), terminalFirst: true });
+    refreshIfHere();
+    return;
+  }
+  // the CLI says it is signed in: confirm at once instead of waiting for the next poll
+  if (attempt !== claude.attempt) return;
+  const s = await assistantStatus().catch(() => null);
+  if (attempt === claude.attempt && s?.loggedIn) connected(s);
+}
+
+const assistantActions = {
+  claudeCheck: () => {
+    if (claude.checking) return;
+    if (!claude.status) claude.error = "";
+    checkStatus();
+    app.refresh();
+  },
+  claudeInstall: async () => {
+    if (claude.busy) return;
+    Object.assign(claude, { busy: "install", error: "" });
+    app.refresh();
+    try {
+      await installClaude();
+      claude.status = await assistantStatus();
+      claude.checkedAt = Date.now();
+    } catch (e) {
+      claude.error = e?.message || String(e);
+    } finally {
+      claude.busy = null;
+      refreshIfHere();
+    }
+  },
+  claudeSignIn: () => { if (!claude.busy) beginSignIn("browser"); },
+  claudeTerminal: () => { if (claude.busy !== "signin" || claude.via !== "terminal") beginSignIn("terminal"); },
+  claudeCancel: () => {
+    stopPolling();
+    claude.attempt += 1;
+    claude.busy = null;
+    cancelSignIn().catch(() => {});
+    app.refresh();
+  },
+};
 
 export function render() {
+  // first visit: fetch the status; later visits: show the last one and refresh it quietly
+  if (!claude.checking && !claude.busy && !(claude.error && !claude.status) && (!claude.status || Date.now() - claude.checkedAt > RECHECK_MS)) checkStatus();
   const s = D.settings;
   const items = itemsList();
   const mods = modulesSorted().map(m => {
@@ -40,9 +218,7 @@ export function render() {
             <p class="muted small">When a module has an exam date, its recalls are brought forward so the last one falls before the exam.</p>
           </div>
         </section>
-        <section class="card"><div class="card-h"><h3>Assistant</h3></div>
-          <div class="card-b"><p class="muted">The Notebook uses Claude Code on this Mac, signed in with your own Claude account, to write study guides and quizzes from your lecture PDFs. Claude Code needs to be installed and signed in once, from Terminal.</p></div>
-        </section>
+        ${assistantCard()}
       </div>
       <div class="col">
         <section class="card"><div class="card-h"><h3>Modules and exams</h3><span class="grow"></span><button class="btn ghost small" data-act="addModule">${icon("plus", 15)} Module</button></div>
@@ -93,6 +269,7 @@ function openModule(id) {
 }
 
 export const actions = {
+  ...assistantActions,
   addModule: () => openModule(null),
   editModule: el => openModule(el.dataset.id),
   checkUpdate: () => app.checkUpdate(true),

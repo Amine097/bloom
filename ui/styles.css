@@ -377,6 +377,12 @@ input[type="file"]::file-selector-button { font: inherit; font-weight: 700; colo
 .nb-score { font-size: 46px; font-weight: 800; color: var(--accent-ink); line-height: 1; }
 .nb-score small { font-size: 22px; color: var(--muted); }
 .nb-warn { border: 2px solid var(--accent-soft); }
+.nb-warn .card-b { padding-top: 18px; }
+.pill.ok { background: color-mix(in srgb, var(--ok) 14%, var(--surface)); color: var(--ok); }
+.as-working { display: flex; align-items: center; gap: 9px; }
+.as-working .nb-spin { flex: none; }
+.as-error { color: var(--late); font-size: 13.5px; overflow-wrap: anywhere; }
+.as-btns { align-items: center; }
 @media (max-width: 1040px) { .nb { flex-direction: column; } .nb-side { width: 100%; position: static; } }
 @media (prefers-reduced-motion: reduce) { .nb-spin { animation-duration: 3s; } }
 
