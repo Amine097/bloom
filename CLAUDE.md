@@ -13,6 +13,30 @@ Tauri 2. Public repo: `Amine097/bloom`.
   migration in `ui/js/store.js` (`migrate`), with the `version` field bumped.
 - The UI is in English.
 
+## Who does the work
+
+The main session is the orchestrator and lead of this project, not necessarily the coder. The
+goal is to spend fewer tokens without lowering the quality of the work. Pick by difficulty:
+
+- **Easy** (a contained change with an obvious solution: copy, a style tweak, a small field, a
+  rename, a simple test) → launch a **Sonnet** agent.
+- **Medium** (a feature inside one view, a refactor of one module, a bug with a known cause) →
+  launch an **Opus** agent.
+- **Hard** (architecture, the data shape and migrations, recall scheduling, the native shell,
+  the updater and release pipeline, anything spanning several modules, any bug whose cause is
+  unknown) → the main session codes it itself.
+
+How to delegate so it actually saves tokens:
+
+- An agent starts with no memory of the conversation. Give it a brief that stands on its own:
+  the goal, the exact files to touch, the conventions that apply, what "done" means, and what
+  to report back (a short summary, not file dumps).
+- If writing that brief would cost more than making the change, the main session makes the
+  change. A one-line edit in a file already open is never delegated.
+- The main session stays responsible for the result: it reviews the diff, runs `npm test`, and
+  checks the screen when the change is visual, before telling the user it is done.
+- Agents never commit, push or deploy. The main session does that.
+
 ## Layout
 
 - `ui/` — the whole interface: plain HTML/CSS/ES modules, no build step, no npm dependencies.
