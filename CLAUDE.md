@@ -93,4 +93,10 @@ The updater signing key is in `~/.tauri/bloom.key` (never commit it) and in the 
   `lastRight`); the quiz also keeps `best` and the last 10 `sessions`. The full shape is at the
   top of the quiz section of `notebook-core.js`. A session draws a few questions (never asked and
   missed last time first) and shuffles their options; the stored option order never changes.
-- The Planner is a placeholder. It will call the Claude Code CLI the same way.
+- A notebook entry may also hold `cards` (flashcards, shape at the top of `ui/js/cards-core.js`)
+  and `chat` (the Ask tab, `ui/js/chat-core.js`).
+- The Planner asks the assistant once a week for a tickable list of goals, each linked to a
+  lecture, recall, deadline or to-do; kept in `D.planner` (shape at the top of `ui/js/planner-core.js`).
+- Assistants: Claude Code first; Codex (OpenAI's CLI, her ChatGPT account) is the backup while
+  Claude's usage limit lasts or when Claude is not set up (`ui/js/assistant-core.js`). The native
+  shell has the same commands for both (`ask_*`, `*_status`, `*_install`, `*_login`, ...).

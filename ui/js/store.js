@@ -35,7 +35,10 @@ function migrate(data) {
     const quiz = migrateQuiz(nb.quiz);
     if (quiz) nb.quiz = quiz;
   }
-  data.version = 3;
+  // v4: a notebook entry may also carry `cards` (flashcards, see cards-core.js) and `chat` (the Ask
+  // tab, see chat-core.js), and D.planner holds the week's plan (see planner-core.js). All are
+  // optional and read with defaults, so there is nothing to convert.
+  data.version = 4;
   return data;
 }
 

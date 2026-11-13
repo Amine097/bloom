@@ -6,7 +6,10 @@ import { askAboutPdf, assistantStatus } from "../assistant.js";
 
 /** "<lectureId>:<kind>" while the assistant is working on it. */
 const running = new Set();
-/** null, or why the assistant cannot be used yet: "missing" (not installed) or "signedout". */
+/**
+ * null, or why no assistant can be used yet: "missing" (neither Claude nor Codex is installed) or
+ * "signedout" (at least one is installed, none is signed in).
+ */
 let setup = null;
 
 export const isRunning = (id, kind) => running.has(`${id}:${kind}`);
@@ -46,9 +49,9 @@ export async function runJob(id, kind, prompt, done) {
     if (msg) toast(msg);
     return true;
   } catch (e) {
-    if (e?.code === "no-claude") {
+    if (e?.code === "no-claude" || e?.code === "no-codex") {
       setup = "missing";
-      toast("Claude Code is not installed on this Mac.", "error");
+      toast(e.code === "no-codex" ? "Codex is not installed on this Mac." : "No assistant (Claude or Codex) is installed on this Mac.", "error");
     } else toast(e?.message || String(e), "error");
     return false;
   } finally {

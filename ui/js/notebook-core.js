@@ -233,6 +233,38 @@ export function pickSession(questions, size, rand = Math.random) {
   return shuffled(chosen.length, rand).map(i => ({ id: chosen[i].id, order: shuffled(chosen[i].options.length, rand) }));
 }
 
+/** A bank's questions in the order pickSession would choose them (same ranking, same use of `rand`). */
+function ranked(questions, rand) {
+  const tier = x => (!x.seen || x.lastRight === false ? 0 : 1);
+  return shuffled(questions.length, rand).map(i => questions[i])
+    .map((x, k) => ({ x, k }))
+    .sort((a, b) => tier(a.x) - tier(b.x) || (a.x.lastSeen || "").localeCompare(b.x.lastSeen || "") || a.k - b.k)
+    .map(({ x }) => x);
+}
+
+/**
+ * Chooses a session across several lectures' banks (a module quiz). `banks` is
+ * [{ lecture, questions }]. Each bank is ranked as in pickSession (never seen and missed last time
+ * first, then the least recently seen), and the lectures take turns, in a random order, giving
+ * their next question: a big bank cannot crowd out a small one. `size` is a number or "all".
+ * → [{ lecture, id, order }] in the order to ask them. With one bank, the same draw as pickSession.
+ */
+export function pickModuleSession(banks, size, rand = Math.random) {
+  const lists = banks.map(b => ({ lecture: b.lecture, queue: ranked(b.questions || [], rand) })).filter(l => l.queue.length);
+  const total = lists.reduce((sum, l) => sum + l.queue.length, 0);
+  const n = size === "all" ? total : Math.max(0, Math.min(Number(size) || 0, total));
+  const turns = shuffled(lists.length, rand).map(i => lists[i]);
+  const chosen = [];
+  for (let round = 0; chosen.length < n; round++) {
+    for (const l of turns) {
+      if (chosen.length >= n) break;
+      if (round < l.queue.length) chosen.push({ lecture: l.lecture, x: l.queue[round] });
+    }
+  }
+  return shuffled(chosen.length, rand)
+    .map(i => ({ lecture: chosen[i].lecture, id: chosen[i].x.id, order: shuffled(chosen[i].x.options.length, rand) }));
+}
+
 /** A question's history after one more answer. Returns a new question. */
 export const withAnswer = (x, right, date) =>
   ({ ...x, seen: (x.seen || 0) + 1, right: (x.right || 0) + (right ? 1 : 0), lastSeen: date, lastRight: Boolean(right) });

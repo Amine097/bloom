@@ -1,7 +1,7 @@
 //! Native shell for Bloom. The interface (ui/) does all the work; this side only owns the data
 //! file (load, atomic save, one backup per day, export to the Downloads folder), the lecture
-//! PDFs stored beside it in `pdfs/`, turning slides into PDFs with Keynote, and running the Claude
-//! Code CLI (install, sign-in, asking).
+//! PDFs stored beside it in `pdfs/`, turning slides into PDFs with Keynote, and running the
+//! assistants' CLIs: Claude Code, and Codex as its backup (install, sign-in, asking).
 
 use std::fs;
 use std::io::{Read, Write};
@@ -240,9 +240,14 @@ fn find_claude() -> Option<PathBuf> {
             return Some(place);
         }
     }
+    find_in_login_shell("claude")
+}
 
+/// Asks a login shell where `name` is (it sees her PATH). `name` is one of ours, never hers.
+fn find_in_login_shell(name: &str) -> Option<PathBuf> {
     let mut shell = Command::new("/bin/zsh");
-    shell.args(["-lc", "command -v claude"]);
+    let script = format!("command -v {name}");
+    shell.args(["-lc", script.as_str()]);
     let (status, out, _) = run_with_timeout(shell, b"", Duration::from_secs(10)).ok()??;
     if !status.success() {
         return None;
@@ -445,25 +450,7 @@ async fn convert_to_pdf(app: AppHandle, request: tauri::ipc::Request<'_>) -> Res
 /// means the CLI could not be found.
 #[tauri::command]
 async fn ask_claude(app: AppHandle, pdf_id: Option<String>, prompt: String) -> Result<String, String> {
-    let (dir, prompt) = match pdf_id {
-        Some(id) => {
-            let file = pdf_path(&app, &id)?;
-            if !file.is_file() {
-                return Err("The PDF of this lecture is missing. Attach it again from Courses.".into());
-            }
-            let dir = match file.parent() {
-                Some(d) => d.to_path_buf(),
-                None => return Err("invalid file path".into()),
-            };
-            (dir, prompt.replace("{{PDF}}", &file.to_string_lossy()))
-        }
-        None => {
-            // nothing of hers to read: Claude starts in a folder that holds no file
-            let dir = std::env::temp_dir().join("bloom-ask");
-            fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            (dir, prompt)
-        }
-    };
+    let (dir, prompt) = ask_place(&app, pdf_id, prompt)?;
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         let bin = find_claude().ok_or_else(|| "no-claude".to_string())?;
         let mut cmd = Command::new(&bin);
@@ -479,6 +466,30 @@ async fn ask_claude(app: AppHandle, pdf_id: Option<String>, prompt: String) -> R
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Where an assistant runs, and its prompt: beside the lecture PDF, with `{{PDF}}` replaced by the
+/// PDF's absolute path, or, without a PDF, in an empty temporary folder.
+fn ask_place(app: &AppHandle, pdf_id: Option<String>, prompt: String) -> Result<(PathBuf, String), String> {
+    Ok(match pdf_id {
+        Some(id) => {
+            let file = pdf_path(app, &id)?;
+            if !file.is_file() {
+                return Err("The PDF of this lecture is missing. Attach it again from Courses.".into());
+            }
+            let dir = match file.parent() {
+                Some(d) => d.to_path_buf(),
+                None => return Err("invalid file path".into()),
+            };
+            (dir, prompt.replace("{{PDF}}", &file.to_string_lossy()))
+        }
+        None => {
+            // nothing of hers to read: the assistant starts in a folder that holds no file
+            let dir = std::env::temp_dir().join("bloom-ask");
+            fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            (dir, prompt)
+        }
+    })
 }
 
 // ---- setting up Claude Code from Settings: install, sign in, status
@@ -623,10 +634,9 @@ async fn claude_login() -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
-/// Stops a running `claude_login`. Does nothing when none is running.
-#[tauri::command]
-async fn claude_login_cancel() -> Result<(), String> {
-    let pid: Option<u32> = match LOGIN_PID.lock() {
+/// Stops the process kept in `slot` (a running sign-in). Does nothing when none is running.
+async fn stop_tracked(slot: &'static Mutex<Option<u32>>) -> Result<(), String> {
+    let pid: Option<u32> = match slot.lock() {
         Ok(guard) => *guard,
         Err(_) => None,
     };
@@ -640,33 +650,285 @@ async fn claude_login_cancel() -> Result<(), String> {
     Ok(())
 }
 
-/// The fallback sign-in: a small script opened in Terminal, which runs the CLI's own sign-in.
+/// The fallback sign-in: a small script opened in Terminal, which runs `bin` with `args` (plain
+/// words of ours). `name` names the script file.
+fn sign_in_with_terminal(bin: &Path, args: &str, name: &str) -> Result<(), String> {
+    // single-quoted for the shell, with any ' inside written as '\''
+    let quoted = format!("'{}'", bin.to_string_lossy().replace('\'', "'\\''"));
+    let script = format!(
+        "#!/bin/zsh\n{quoted} {args}\necho\necho \"Done. You can close this window and go back to Bloom.\"\n"
+    );
+    let file = std::env::temp_dir().join(format!("{name}.command"));
+    fs::write(&file, script).map_err(|e| format!("Could not prepare the sign-in: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o755))
+            .map_err(|e| format!("Could not prepare the sign-in: {e}"))?;
+    }
+    let status = Command::new("/usr/bin/open")
+        .arg(&file)
+        .status()
+        .map_err(|e| format!("Could not open Terminal: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("Could not open Terminal.".into())
+    }
+}
+
+/// Stops a running `claude_login`. Does nothing when none is running.
+#[tauri::command]
+async fn claude_login_cancel() -> Result<(), String> {
+    stop_tracked(&LOGIN_PID).await
+}
+
+/// The fallback sign-in, in Terminal: the CLI's own sign-in.
 #[tauri::command]
 async fn claude_login_terminal() -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         let bin = find_claude().ok_or_else(|| "no-claude".to_string())?;
-        // single-quoted for the shell, with any ' inside written as '\''
-        let quoted = format!("'{}'", bin.to_string_lossy().replace('\'', "'\\''"));
-        let script = format!(
-            "#!/bin/zsh\n{quoted} auth login --claudeai\necho\necho \"Done. You can close this window and go back to Bloom.\"\n"
-        );
-        let file = std::env::temp_dir().join("bloom-sign-in.command");
-        fs::write(&file, script).map_err(|e| format!("Could not prepare the sign-in: {e}"))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&file, fs::Permissions::from_mode(0o755))
-                .map_err(|e| format!("Could not prepare the sign-in: {e}"))?;
+        sign_in_with_terminal(&bin, "auth login --claudeai", "bloom-sign-in")
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// ---- Codex (OpenAI's CLI), the backup assistant: asking, status, install, sign-in
+
+/// Same flags as CODEX_ARGS in ui/js/assistant-core.js (used by the browser preview): the prompt on
+/// stdin, events as JSON lines, nothing saved, her own config and rules ignored, read-only.
+const CODEX_ARGS: &[&str] = &[
+    "exec",
+    "--json",
+    "--color",
+    "never",
+    "--ephemeral",
+    "--skip-git-repo-check",
+    "--ignore-user-config",
+    "--ignore-rules",
+    "--sandbox",
+    "read-only",
+    "-c",
+    "approval_policy=never",
+    "-",
+];
+
+/// The pid of the running `codex login`, so the sign-in can be cancelled.
+static CODEX_LOGIN_PID: Mutex<Option<u32>> = Mutex::new(None);
+
+/// Where Codex is: where Bloom installs it, Homebrew, npm, then her login shell.
+fn find_codex() -> Option<PathBuf> {
+    let mut places: Vec<PathBuf> = Vec::new();
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        places.push(home.join(".local/bin/codex"));
+        places.push(home.join(".npm-global/bin/codex"));
+    }
+    places.push(PathBuf::from("/opt/homebrew/bin/codex"));
+    places.push(PathBuf::from("/usr/local/bin/codex"));
+    for place in places {
+        if place.is_file() {
+            return Some(place);
         }
-        let status = Command::new("/usr/bin/open")
-            .arg(&file)
-            .status()
-            .map_err(|e| format!("Could not open Terminal: {e}"))?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err("Could not open Terminal.".into())
+    }
+    find_in_login_shell("codex")
+}
+
+/// Reads the JSON lines printed by `codex exec --json` and returns Codex's last message (see
+/// readCodexEvents in ui/js/assistant-core.js, which does the same for the preview).
+fn read_codex_events(status: ExitStatus, out: &[u8], err: &[u8]) -> Result<String, String> {
+    let text = String::from_utf8_lossy(out).into_owned();
+    let mut answer = String::new();
+    let mut failed = String::new();
+    let mut error = String::new();
+    let mut events = 0usize;
+    for line in text.lines() {
+        let Ok(e) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+            continue;
+        };
+        if !e.is_object() {
+            continue;
         }
+        events += 1;
+        match e.get("type").and_then(|v| v.as_str()).unwrap_or("") {
+            "item.completed" => {
+                let item = e.get("item");
+                if item.and_then(|i| i.get("type")).and_then(|v| v.as_str()) == Some("agent_message") {
+                    if let Some(t) = item.and_then(|i| i.get("text")).and_then(|v| v.as_str()) {
+                        answer = t.trim().to_string();
+                    }
+                }
+            }
+            "turn.failed" => {
+                failed = e
+                    .get("error")
+                    .and_then(|x| x.get("message"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("the request failed")
+                    .to_string();
+            }
+            "error" => {
+                error = e.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            }
+            _ => {}
+        }
+    }
+    if !failed.is_empty() {
+        return Err(format!("Codex: {failed}"));
+    }
+    if !answer.is_empty() && status.success() {
+        return Ok(answer);
+    }
+    if !error.is_empty() {
+        return Err(format!("Codex: {error}"));
+    }
+    if events == 0 || !status.success() {
+        let detail = tail_text(err, 300);
+        let code = status.code().filter(|c| *c != 0).map(|c| format!(" (exit code {c})")).unwrap_or_default();
+        return Err(format!("Codex did not answer{code}. {detail}").trim().to_string());
+    }
+    Err("Codex's answer was empty. Try again.".into())
+}
+
+/// Reads what `codex login status` printed ("Logged in using ChatGPT", "Logged in using an API
+/// key - …", "Not logged in"), like readCodexLogin in ui/js/assistant-core.js.
+fn read_codex_login(status: ExitStatus, out: &[u8], err: &[u8]) -> serde_json::Value {
+    let text = strip_ansi(&format!("{}\n{}", String::from_utf8_lossy(out), String::from_utf8_lossy(err))).to_lowercase();
+    let logged_in = status.success() && text.contains("logged in") && !text.contains("not logged in");
+    let method = if !logged_in {
+        serde_json::Value::Null
+    } else if text.contains("chatgpt") {
+        serde_json::json!("ChatGPT")
+    } else if text.contains("api key") {
+        serde_json::json!("API key")
+    } else {
+        serde_json::Value::Null
+    };
+    serde_json::json!({ "installed": true, "loggedIn": logged_in, "method": method })
+}
+
+/// Runs Codex like `ask_claude` runs Claude Code. "no-codex" means the CLI could not be found.
+#[tauri::command]
+async fn ask_codex(app: AppHandle, pdf_id: Option<String>, prompt: String) -> Result<String, String> {
+    let (dir, prompt) = ask_place(&app, pdf_id, prompt)?;
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        let bin = find_codex().ok_or_else(|| "no-codex".to_string())?;
+        let mut cmd = Command::new(&bin);
+        cmd.args(CODEX_ARGS).current_dir(&dir).env("PATH", child_path(&bin));
+        match run_with_timeout(cmd, prompt.as_bytes(), CLAUDE_TIMEOUT) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err("no-codex".into()),
+            Err(e) => Err(format!("Could not start Codex: {e}")),
+            Ok(None) => Err("Codex took longer than 5 minutes and was stopped. Try again.".into()),
+            Ok(Some((status, out, err))) => read_codex_events(status, &out, &err),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// `{"installed": false}`, or `{"installed": true, "loggedIn", "method"}`.
+#[tauri::command]
+async fn codex_status() -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
+        let Some(bin) = find_codex() else {
+            return Ok(serde_json::json!({ "installed": false }));
+        };
+        let mut cmd = Command::new(&bin);
+        cmd.args(["login", "status"]).env("PATH", child_path(&bin));
+        match run_with_timeout(cmd, b"", STATUS_TIMEOUT) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(serde_json::json!({ "installed": false })),
+            Err(e) => Err(format!("Could not start Codex: {e}")),
+            Ok(None) => Err("Codex did not answer in time. Try again.".into()),
+            Ok(Some((status, out, err))) => Ok(read_codex_login(status, &out, &err)),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Downloads OpenAI's own build of Codex for this Mac from its GitHub releases, into
+/// ~/.local/bin/codex. No Node.js needed.
+const CODEX_INSTALL: &str = r#"set -euo pipefail
+arch="$(uname -m)"; [ "$arch" = "arm64" ] && arch="aarch64"
+tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+curl -fsSL "https://github.com/openai/codex/releases/latest/download/codex-${arch}-apple-darwin.tar.gz" -o "$tmp/codex.tar.gz"
+tar -xzf "$tmp/codex.tar.gz" -C "$tmp"
+bin="$(find "$tmp" -type f -name 'codex*' ! -name '*.tar.gz' | head -n 1)"
+[ -n "$bin" ] || { echo "The download held no Codex program." >&2; exit 1; }
+mkdir -p "$HOME/.local/bin"
+mv -f "$bin" "$HOME/.local/bin/codex"
+chmod +x "$HOME/.local/bin/codex"
+"$HOME/.local/bin/codex" --version"#;
+
+#[tauri::command]
+async fn codex_install() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let mut cmd = Command::new("/bin/bash");
+        cmd.args(["-c", CODEX_INSTALL]).env("PATH", child_path(Path::new("/bin/bash")));
+        match run_with_timeout(cmd, b"", INSTALL_TIMEOUT) {
+            Err(e) => Err(format!("Could not start the installer: {e}")),
+            Ok(None) => Err("The installation took longer than 10 minutes and was stopped. Check the internet connection and try again.".into()),
+            Ok(Some((status, out, err))) => {
+                if status.success() && find_codex().is_some() {
+                    return Ok(());
+                }
+                let mut detail = tail_text(&err, 300);
+                if detail.is_empty() {
+                    detail = tail_text(&out, 300);
+                }
+                let code = status.code().map(|c| format!(" (exit code {c})")).unwrap_or_default();
+                Err(format!("Codex could not be installed{code}. {detail}").trim().to_string())
+            }
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Signs in with her ChatGPT account: the CLI opens the browser and waits for it.
+#[tauri::command]
+async fn codex_login() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let bin = find_codex().ok_or_else(|| "no-codex".to_string())?;
+        let mut cmd = Command::new(&bin);
+        cmd.arg("login").env("PATH", child_path(&bin));
+        let result = run_tracked(cmd, b"", LOGIN_TIMEOUT, Some(&CODEX_LOGIN_PID));
+        if let Ok(mut pid) = CODEX_LOGIN_PID.lock() {
+            *pid = None;
+        }
+        match result {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err("no-codex".into()),
+            Err(e) => Err(format!("Could not start the sign-in: {e}")),
+            Ok(None) => Err("The sign-in was not finished within 5 minutes and was stopped. Try again.".into()),
+            Ok(Some((status, out, err))) => {
+                if status.success() {
+                    return Ok(());
+                }
+                let mut detail = tail_text(&err, 300);
+                if detail.is_empty() {
+                    detail = tail_text(&out, 300);
+                }
+                Err(format!("The sign-in did not finish. {detail}").trim().to_string())
+            }
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Stops a running `codex_login`. Does nothing when none is running.
+#[tauri::command]
+async fn codex_login_cancel() -> Result<(), String> {
+    stop_tracked(&CODEX_LOGIN_PID).await
+}
+
+/// The fallback sign-in, in Terminal: Codex's own sign-in.
+#[tauri::command]
+async fn codex_login_terminal() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let bin = find_codex().ok_or_else(|| "no-codex".to_string())?;
+        sign_in_with_terminal(&bin, "login", "bloom-codex-sign-in")
     })
     .await
     .map_err(|e| e.to_string())?
@@ -690,7 +952,13 @@ pub fn run() {
             claude_install,
             claude_login,
             claude_login_cancel,
-            claude_login_terminal
+            claude_login_terminal,
+            ask_codex,
+            codex_status,
+            codex_install,
+            codex_login,
+            codex_login_cancel,
+            codex_login_terminal
         ])
         .run(tauri::generate_context!())
         .expect("error while running Bloom");

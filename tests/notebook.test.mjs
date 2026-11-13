@@ -243,3 +243,71 @@ test("readEnvelope returns the result and turns failures into messages", () => {
   assert.throws(() => readEnvelope("", 2, "boom"), /did not answer \(exit code 2\)\. boom/);
   assert.throws(() => readEnvelope(env({ result: "  " })), /empty/);
 });
+
+// ---- module quiz: one session drawn from several lectures' banks
+
+import { pickModuleSession } from "../ui/js/notebook-core.js";
+
+const bankFor = (lecture, count, over = () => ({})) =>
+  ({ lecture, questions: Array.from({ length: count }, (_, i) => banked(`${lecture}-${i}`, over(i))) });
+const perLecture = picks => picks.reduce((c, m) => ({ ...c, [m.lecture]: (c[m.lecture] || 0) + 1 }), {});
+
+test("pickModuleSession shares the session fairly between the lectures", () => {
+  for (let s = 1; s < 30; s++) {
+    const picks = pickModuleSession([bankFor("big", 40), bankFor("small", 8)], 10, seeded(s));
+    assert.deepEqual(perLecture(picks), { big: 5, small: 5 });
+    // an odd size: one lecture gets one more, never two more
+    const three = perLecture(pickModuleSession([bankFor("a", 40), bankFor("b", 8), bankFor("c", 3)], 10, seeded(s)));
+    assert.deepEqual(Object.values(three).sort(), [3, 3, 4]);
+    // a small bank runs out; the others fill the session
+    assert.deepEqual(perLecture(pickModuleSession([bankFor("big", 40), bankFor("small", 3)], 20, seeded(s))), { big: 17, small: 3 });
+  }
+});
+
+test("pickModuleSession asks never-seen and missed questions of each lecture first", () => {
+  const fresh = i => (i < 2 ? { seen: 0, lastSeen: null, lastRight: null } : i === 2 ? { lastRight: false, lastSeen: "2026-11-12" } : {});
+  for (let s = 1; s < 30; s++) {
+    const picks = pickModuleSession([bankFor("a", 20, fresh), bankFor("b", 20, fresh)], 6, seeded(s));
+    assert.deepEqual(picks.map(m => m.id).sort(), ["a-0", "a-1", "a-2", "b-0", "b-1", "b-2"]);
+  }
+  // then the least recently seen
+  const old = i => ({ lastSeen: i === 7 ? "2026-09-01" : "2026-11-10" });
+  for (let s = 1; s < 10; s++) {
+    assert.deepEqual(pickModuleSession([bankFor("a", 10, old), bankFor("b", 10, old)], 2, seeded(s)).map(m => m.id).sort(), ["a-7", "b-7"]);
+  }
+});
+
+test("pickModuleSession caps the size and shuffles the options", () => {
+  const banks = [bankFor("a", 4), bankFor("b", 3), { lecture: "c", questions: [] }];
+  assert.equal(pickModuleSession(banks, 30, seeded(2)).length, 7);
+  assert.equal(pickModuleSession(banks, "all", seeded(2)).length, 7);
+  assert.equal(pickModuleSession(banks, 0, seeded(2)).length, 0);
+  assert.deepEqual(pickModuleSession([], 10), []);
+  const all = pickModuleSession(banks, "all", seeded(5));
+  assert.equal(new Set(all.map(m => m.id)).size, 7, "no question twice");
+  for (const m of all) assert.deepEqual([...m.order].sort(), [0, 1, 2, 3]);
+  // ids are only unique within a lecture: the same id in two banks is two questions
+  const twins = pickModuleSession([bankFor("a", 2), { lecture: "b", questions: bankFor("a", 2).questions }], "all", seeded(3));
+  assert.equal(twins.length, 4);
+  assert.deepEqual(perLecture(twins), { a: 2, b: 2 });
+});
+
+test("pickModuleSession with one lecture draws exactly what pickSession draws", () => {
+  const bank = bankFor("only", 12, i => (i % 3 ? {} : { seen: 0, lastSeen: null, lastRight: null }));
+  for (let s = 1; s < 20; s++) {
+    for (const size of [1, 5, 12, "all"]) {
+      const one = pickModuleSession([bank], size, seeded(s));
+      assert.deepEqual(one, pickSession(bank.questions, size, seeded(s)).map(m => ({ lecture: "only", ...m })));
+    }
+  }
+});
+
+test("pickModuleSession is repeatable with the same random source, and does not change the banks", () => {
+  const banks = [bankFor("a", 9), bankFor("b", 5), bankFor("c", 14)];
+  const before = JSON.stringify(banks);
+  assert.deepEqual(pickModuleSession(banks, 10, seeded(11)), pickModuleSession(banks, 10, seeded(11)));
+  const draws = new Set();
+  for (let s = 1; s < 20; s++) draws.add(JSON.stringify(pickModuleSession(banks, 10, seeded(s))));
+  assert.ok(draws.size > 10, "different seeds give different sessions");
+  assert.equal(JSON.stringify(banks), before);
+});
