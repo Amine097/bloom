@@ -76,8 +76,9 @@ export function matchFiles(files, lectures, known = {}) {
 export function titleFromFile(name) {
   const base = String(name).replace(/\.(pdf|pptx?|key)$/i, "");
   const t = base.replace(/_+/g, " ")
-    .replace(/(?<!\w)(20\d{6}|20\d{2})(?!\w)/g, " ") // 20261103, 2026
-    .replace(/(?<!\w)copy(?!\w)/gi, " ")
+    // no lookbehind here or below: older macOS webviews reject it, and the whole app then fails to load
+    .replace(/(^|\W)(?:20\d{6}|20\d{2})(?!\w)/g, "$1 ") // 20261103, 2026
+    .replace(/(^|\W)copy(?!\w)/gi, "$1 ")
     .replace(/\s+/g, " ")
     .replace(/^[\s\-–.,;:]+|[\s\-–.,;:]+$/g, "");
   const out = t || base.trim();
@@ -86,7 +87,7 @@ export function titleFromFile(name) {
 
 /** The teaching date written in a file name as YYYYMMDD ("… - 20261103.pdf"), or null. */
 export function dateFromFile(name) {
-  const m = String(name).match(/(?<!\d)(20\d{2})(\d{2})(\d{2})(?!\d)/);
+  const m = String(name).match(/(?:^|\D)(20\d{2})(\d{2})(\d{2})(?!\d)/);
   if (!m) return null;
   const [, y, mo, d] = m.map(Number);
   if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;

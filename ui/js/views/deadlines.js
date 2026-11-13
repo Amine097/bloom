@@ -72,7 +72,7 @@ export function releaseExam(mid, date) {
   const m = D.modules[mid];
   if (!m || !date || m.exam !== date) return;
   const exams = deadlinesList().filter(d => d.type === "Exam" && d.module === mid);
-  const next = exams.find(d => d.due.slice(0, 10) >= today()) || exams.at(-1);
+  const next = exams.find(d => d.due.slice(0, 10) >= today()) || exams[exams.length - 1];
   m.exam = next ? next.due.slice(0, 10) : null;
 }
 

@@ -41,7 +41,7 @@ If you cannot read the PDF at all, reply with exactly ${CODEX_NO_PDF} and nothin
 /** Codex's answer, or a readable Error when it said it could not read the PDF. */
 export function checkAnswer(text, who) {
   if (who === "codex" && String(text ?? "").includes(CODEX_NO_PDF)) {
-    throw new Error("Codex could not read this PDF on this computer. Try again with Claude.");
+    throw new Error("Codex could not read this PDF on this computer. Try again when Claude is available.");
   }
   return text;
 }

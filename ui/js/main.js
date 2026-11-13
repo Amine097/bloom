@@ -108,7 +108,8 @@ function bindEvents() {
     handler(form.dataset.submit)?.(form, e);
   });
   // an app left open overnight should not keep showing yesterday
-  const rollover = () => { if (today() !== shownDay) { shownDay = today(); refresh(); } };
+  // (and a new week gets its plan, whichever view is open)
+  const rollover = () => { if (today() !== shownDay) { shownDay = today(); refresh(); planner.onStart(); } };
   setInterval(rollover, 60_000);
   document.addEventListener("visibilitychange", rollover);
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);

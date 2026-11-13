@@ -89,7 +89,7 @@ function answerPart(id, x, busy) {
   }
   const why = failed.get(x.id);
   return `<div class="nba-a nba-failed">
-    <p>${why ? esc(why) : "Claude could not answer this question."}</p>
+    <p>${why ? esc(why) : "This question did not get an answer."}</p>
     <div class="nba-foot">
       <button type="button" class="btn soft small" data-act="chatRetry" data-ex="${esc(x.id)}" ${busy ? 'disabled title="Claude is answering another question"' : ""}>${icon("repeat", 15)} Try again</button>
       <span class="grow"></span>
