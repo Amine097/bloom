@@ -1,14 +1,23 @@
-// What a brand-new install starts with: the modules and the lectures known on 13 Nov 2026.
-// Only used when there is no data file yet; after that everything is edited in the app.
-// A date is given only where the slides themselves carry a teaching date.
+// What a brand-new install starts with: the modules, their exams and the lectures known on
+// 13 Nov 2026, and the LTK video hours as to-dos. Only used when there is no data file yet; after
+// that everything is edited in the app. A lecture date is given only where the slides themselves
+// carry a teaching date.
 
+const COMBINED_EXAM = "2026-12-21";
+
+// `exam`: the date recalls adapt to. Eight modules share one written exam on 21 December.
 export const MODULES = [
-  { id: "heart", name: "Heart", color: "rose" },
-  { id: "cns", name: "CNS", color: "lavender" },
-  { id: "pharma", name: "Pharma", color: "peach" },
-  { id: "blood", name: "Blood", color: "coral" },
-  { id: "patho", name: "Pathogenesis", color: "mint" },
-  { id: "tumor", name: "Tumor Biology", color: "sky" },
+  { id: "heart", name: "Heart", color: "rose", exam: COMBINED_EXAM },
+  { id: "cns", name: "CNS", color: "lavender", exam: COMBINED_EXAM },
+  { id: "pharma", name: "Pharma", color: "peach", exam: COMBINED_EXAM },
+  { id: "pkpd", name: "PK/PD", color: "gold", exam: COMBINED_EXAM },
+  { id: "blood", name: "Blood", color: "coral", exam: COMBINED_EXAM },
+  { id: "tumor", name: "Tumor Biology", color: "sky", exam: COMBINED_EXAM },
+  { id: "kidney", name: "Kidney", color: "plum", exam: COMBINED_EXAM },
+  { id: "modelling", name: "Modelling", color: "mint", exam: COMBINED_EXAM },
+  { id: "ltk", name: "LTK", color: "peach", exam: "2026-12-14" },
+  { id: "patho", name: "Pathogenesis", color: "mint", exam: "2027-01-08" },
+  { id: "micro", name: "Microscopy", color: "lavender", exam: "2027-01-15" },
 ];
 
 const HEART = [
@@ -77,9 +86,17 @@ const TUMOR = [
   ["Tumor immunology"],
 ];
 
+/** Mondays, Tuesdays, Thursdays and Saturdays before the LTK exam: one video hour each. */
+const LTK_DAYS = [
+  "2026-11-16", "2026-11-17", "2026-11-19", "2026-11-21",
+  "2026-11-23", "2026-11-24", "2026-11-26", "2026-11-28",
+  "2026-11-30", "2026-12-01", "2026-12-03", "2026-12-05",
+  "2026-12-07", "2026-12-08", "2026-12-10", "2026-12-12",
+];
+
 export function seedData() {
   const modules = {};
-  MODULES.forEach((m, i) => { modules[m.id] = { name: m.name, color: m.color, exam: null, order: i }; });
+  MODULES.forEach((m, i) => { modules[m.id] = { name: m.name, color: m.color, exam: m.exam || null, order: i }; });
 
   const items = {};
   const add = (module, list) => list.forEach(([title, date], i) => {
@@ -93,13 +110,33 @@ export function seedData() {
   add("blood", BLOOD);
   add("tumor", TUMOR);
 
+  // the exams, as deadlines; the combined one belongs to no single module (each module above
+  // carries its date as its exam)
+  const deadlines = {};
+  const exam = (id, title, module, due) => { deadlines[id] = { title, module, type: "Exam", due, notes: "", done: false, doneAt: null }; };
+  exam("exam-combined", "Combined exam: Blood, Heart, CNS, PK/PD, Pharma, Tumor Biology, Kidney, Modelling", null, COMBINED_EXAM);
+  exam("exam-ltk", "LTK exam", "ltk", "2026-12-14");
+  exam("exam-patho", "Pathogenesis exam", "patho", "2027-01-08");
+  exam("exam-micro", "Microscopy exam", "micro", "2027-01-15");
+
+  // LTK: 20 one-hour videos before the exam, 4 already watched; the other 16 spread over the
+  // four weeks before it, four a week
+  const projects = { "ltk": { name: "LTK videos", color: "peach", order: 0 } };
+  const tasks = {};
+  LTK_DAYS.forEach((due, i) => {
+    tasks[`ltk-${String(i + 1).padStart(2, "0")}`] = {
+      title: "1 hour of LTK videos", notes: "", project: "ltk", parent: null, prio: 4, due, recur: null,
+      done: false, doneAt: null, order: i, created: "2026-11-13",
+    };
+  });
+
   return {
-    version: 3,
+    version: 4,
     settings: { name: "", semesterStart: "2026-09-14", recall1: 7, recall2: 14, maxRecallsPerDay: 4, theme: "auto", background: "nature", welcomed: false },
     modules,
     items,
-    deadlines: {},
-    todo: { projects: {}, tasks: {} },
+    deadlines,
+    todo: { projects, tasks },
     planner: {},
     notebook: {},
   };
