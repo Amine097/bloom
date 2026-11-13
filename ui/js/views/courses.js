@@ -4,6 +4,8 @@ import { today, fmtDay, fmtWday, weekLabel, relDay, weekOf } from "../dates.js";
 import { stateOf, setStep, LABEL } from "../recall.js";
 import { esc, icon, app, openModal, openViewer, confirmBox, field, input, select, cvar, toast } from "../ui.js";
 import { storePdf, pdfUrl, removePdf, fmtSize } from "../files.js";
+import { matchFiles } from "../attach-core.js";
+import { LECTURE_FILES } from "../seed.js";
 
 const PDF_ACCEPT = 'accept="application/pdf,.pdf"';
 
@@ -93,7 +95,10 @@ export function render() {
 
   return `<header class="page-h">
       <div><h1>Courses</h1><p class="muted">Lectures by the week they were taught. Tick each step as you go.</p></div>
-      <button class="btn primary" data-act="add">${icon("plus", 16)} Add</button>
+      <div class="page-actions">
+        <label class="btn ghost" title="Choose several lecture PDFs at once; Bloom finds the lecture each one belongs to">${icon("clip", 16)} Attach PDFs<input type="file" ${PDF_ACCEPT} multiple data-change="bulkPdf" hidden></label>
+        <button class="btn primary" data-act="add">${icon("plus", 16)} Add</button>
+      </div>
     </header>
     <div class="toolbar">${chips}<span class="grow"></span>
       <label class="switch"><input type="checkbox" data-change="hideDone" ${view.hideDone ? "checked" : ""}> Hide finished</label>
@@ -175,7 +180,71 @@ function openEditor(id) {
   });
 }
 
+const HOW = { known: "matched by file name", title: "guessed from the title", attached: "already attached" };
+
+/** Several PDFs at once: Bloom proposes a lecture for each, she checks, then they are attached. */
+function openBulk(files) {
+  const lectures = itemsList().filter(isLecture);
+  const matches = matchFiles(files, lectures.map(l => ({ id: l.id, title: l.title, pdfName: l.pdf?.name ?? null })), LECTURE_FILES);
+  const groups = [...modulesSorted(), { id: null, name: "No module" }]
+    .map(m => [m, lectures.filter(l => (l.module ?? null) === m.id || (m.id === null && !D.modules[l.module]))])
+    .filter(([, list]) => list.length);
+  const options = chosen => `<option value="">Don't attach</option>` + groups.map(([m, list]) =>
+    `<optgroup label="${esc(m.name)}">${list.map(l =>
+      `<option value="${l.id}" ${l.id === chosen ? "selected" : ""}>${esc(l.title)}${l.pdf ? " · has a PDF" : ""}</option>`).join("")}</optgroup>`).join("");
+  const found = matches.filter(m => m.how === "known" || m.how === "title").length;
+  const rows = files.map((f, i) => {
+    const m = matches[i];
+    const chosen = m.how === "attached" ? null : m.id;
+    return `<div class="bulk-row ${chosen ? "" : "off"}">
+      <span class="bulk-name"><span class="t" title="${esc(f.name)}">${esc(f.name)}</span>
+      <span class="sub">${m.how ? HOW[m.how] : "no match found"} · ${fmtSize(f.size)}</span></span>
+      <select name="f${i}" aria-label="Lecture for ${esc(f.name)}">${options(chosen)}</select>
+    </div>`;
+  }).join("");
+  openModal({
+    title: `Attach ${files.length} PDF${files.length === 1 ? "" : "s"}`,
+    wide: true,
+    submit: "Attach",
+    body: `<p class="muted small">Bloom found a lecture for ${found} of them. Check each pair; choosing a lecture that already has a PDF replaces it.</p>
+      <div class="bulk">${rows}</div>`,
+    onSubmit: async (v, form) => {
+      const pairs = files.map((f, i) => [f, v[`f${i}`]]).filter(([, id]) => id);
+      const ids = pairs.map(([, id]) => id);
+      const twice = ids.find((id, i) => ids.indexOf(id) !== i);
+      if (twice) { toast(`Two files go to "${D.items[twice].title}". Pick one.`, "error"); return false; }
+      if (!pairs.length) return;
+      const button = form.querySelector('[type="submit"]');
+      button.disabled = true;
+      let done = 0;
+      const failed = [];
+      for (const [file, id] of pairs) {
+        button.textContent = `Attaching ${done + 1} of ${pairs.length}…`;
+        let pdf;
+        try { pdf = await storePdf(file); }
+        catch (e) { failed.push(`${file.name}: ${e.message}`); continue; }
+        const it = D.items[id];
+        if (!it) { removePdf(pdf.id); continue; }
+        const old = it.pdf;
+        it.pdf = pdf;
+        if (old) { removePdf(old.id); delete D.notebook[id]; } // its study guide and quiz came from the old PDF
+        done++;
+      }
+      save(); app.refresh();
+      if (done) toast(`${done} PDF${done === 1 ? "" : "s"} attached 📎`);
+      if (failed.length) toast(`Not attached: ${failed.join("; ")}`, "error");
+    },
+  });
+  document.querySelector("#modal .bulk").addEventListener("change", e =>
+    e.target.closest(".bulk-row")?.classList.toggle("off", !e.target.value));
+}
+
 export const actions = {
+  bulkPdf: el => {
+    const files = [...el.files];
+    el.value = "";
+    if (files.length) openBulk(files);
+  },
   add: () => openEditor(null),
   edit: el => openEditor(el.dataset.id),
   filter: el => { view.module = el.dataset.module; app.refresh(); },
