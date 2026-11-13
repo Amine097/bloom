@@ -1,6 +1,6 @@
 // Courses: every lecture and study task, grouped by the week it was taught, then by date.
 import { D, save, uid, currentWeek, itemWeek, isLecture, itemsList, modulesSorted, moduleOf, pendingRecalls } from "../store.js";
-import { today, fmtWday, weekLabel, relDay, weekOf } from "../dates.js";
+import { today, fmtDay, fmtWday, weekLabel, relDay, weekOf } from "../dates.js";
 import { stateOf, setStep, LABEL } from "../recall.js";
 import { esc, icon, app, openModal, openViewer, confirmBox, field, input, select, cvar, toast } from "../ui.js";
 import { storePdf, pdfUrl, removePdf, fmtSize } from "../files.js";
@@ -56,13 +56,16 @@ export function render() {
   const recalls = Object.fromEntries(pendingRecalls().map(r => [r.id, r]));
   const modOrder = Object.fromEntries(modulesSorted().map((m, i) => [m.id, i]));
 
+  if (view.module !== "all" && !D.modules[view.module]) view.module = "all"; // the module was deleted
   let items = itemsList();
   if (view.module !== "all") items = items.filter(it => it.module === view.module);
   if (view.hideDone) items = items.filter(it => (isLecture(it) ? stateOf(it) !== "recall2" : !it.doneAt));
 
+  // 0 holds the items with no week; "before" the dated ones that fall before week 1
   const byWeek = new Map();
   for (const it of items) {
-    const w = itemWeek(it) ?? 0;
+    const iw = itemWeek(it);
+    const w = iw >= 1 ? iw : it.date ? "before" : 0;
     if (!byWeek.has(w)) byWeek.set(w, []);
     byWeek.get(w).push(it);
   }
@@ -75,6 +78,8 @@ export function render() {
     const started = lectures.filter(l => stateOf(l) !== "todo").length;
     const head = w === 0
       ? `<h3>No week yet</h3><span class="muted">set a date or a week to file these</span>`
+      : w === "before"
+      ? `<h3>Before week 1</h3><span class="muted">before ${fmtDay(start)}</span>`
       : `<h3>Week ${w}</h3><span class="muted">${weekLabel(w, start)}</span>${w === cw ? '<span class="pill accent">this week</span>' : ""}`;
     return `<section class="card wsec ${w === cw ? "current" : ""}" ${w === cw ? 'id="current-week"' : ""}>
       <div class="card-h">${head}<span class="grow"></span>${lectures.length ? `<span class="muted mono">${started}/${lectures.length} seen</span>` : ""}</div>
@@ -82,7 +87,7 @@ export function render() {
     </section>`;
   };
 
-  const weeks = [...byWeek.keys()].filter(w => w !== 0).sort((a, b) => a - b);
+  const weeks = [...byWeek.keys()].filter(w => w >= 1).sort((a, b) => a - b);
   const chips = [["all", "All"], ...modulesSorted().map(m => [m.id, m.name])].map(([id, name]) =>
     `<button class="chip ${view.module === id ? "on" : ""}" data-act="filter" data-module="${id}" ${id === "all" ? "" : cvar(D.modules[id].color)}>${id === "all" ? "" : '<span class="dot"></span>'}${esc(name)}</button>`).join("");
 
@@ -95,6 +100,7 @@ export function render() {
       ${weeks.includes(cw) ? `<button class="btn ghost small" data-act="jump">Go to week ${cw}</button>` : ""}
     </div>
     ${byWeek.has(0) ? section(0, byWeek.get(0)) : ""}
+    ${byWeek.has("before") ? section("before", byWeek.get("before")) : ""}
     ${weeks.map(w => section(w, byWeek.get(w))).join("")}
     ${items.length ? "" : `<div class="empty">Nothing here yet. Add your first lecture.</div>`}`;
 }
@@ -209,7 +215,7 @@ export const actions = {
   setDate: el => {
     const it = D.items[el.dataset.id];
     it.date = el.value || null;
-    if (it.date) it.week = weekOf(it.date, D.settings.semesterStart);
+    if (it.date) { const w = weekOf(it.date, D.settings.semesterStart); it.week = w >= 1 ? w : null; }
     save(); app.refresh();
   },
   setWeek: el => {

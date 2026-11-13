@@ -24,21 +24,27 @@ export function deadlineRow(d) {
     <button class="check ${d.done ? "on" : ""}" data-act="toggleDeadline" data-id="${d.id}" aria-label="Done" aria-pressed="${Boolean(d.done)}">${icon("check", 14)}</button>
     <button class="row-main" data-act="editDeadline" data-id="${d.id}">
       <span class="t">${esc(d.title)}</span>
-      <span class="sub">${m ? `<span class="dot"></span>${esc(m.name)} · ` : ""}${esc(d.type || "Deadline")} · ${fmtWday(d.due)}${d.due.length > 10 ? ", " + d.due.slice(11, 16) : ""}${d.notes ? " · " + esc(d.notes.slice(0, 70)) : ""}</span>
+      <span class="sub">${m ? `<span class="dot"></span>` : ""}<span class="sub-text">${m ? `${esc(m.name)} · ` : ""}${esc(d.type || "Deadline")} · ${fmtWday(d.due)}${d.due.length > 10 ? ", " + d.due.slice(11, 16) : ""}${d.notes ? " · " + esc(d.notes.slice(0, 70)) : ""}</span></span>
     </button>
     <span class="badge ${c.cls}">${c.text}</span>
   </div>`;
 }
 
+/** Sunday of the current calendar week. */
+const weekEnd = () => addDays(weekStart(currentWeek(), D.settings.semesterStart), 6);
+
+/** Open deadlines from today to Sunday: the "This week" group. Also used by the dashboard. */
+export const dueThisWeek = (open, now = today()) =>
+  open.filter(d => !d.done && d.due.slice(0, 10) >= now && d.due.slice(0, 10) <= weekEnd());
+
 export function render() {
   const now = today();
-  const start = D.settings.semesterStart;
-  const endOfWeek = addDays(weekStart(currentWeek(), start), 6);
+  const endOfWeek = weekEnd();
   const all = deadlinesList();
   const open = all.filter(d => !d.done);
   const groups = [
     ["Overdue", open.filter(d => d.due.slice(0, 10) < now)],
-    ["This week", open.filter(d => d.due.slice(0, 10) >= now && d.due.slice(0, 10) <= endOfWeek)],
+    ["This week", dueThisWeek(open, now)],
     ["Next week", open.filter(d => d.due.slice(0, 10) > endOfWeek && d.due.slice(0, 10) <= addDays(endOfWeek, 7))],
     ["Later", open.filter(d => d.due.slice(0, 10) > addDays(endOfWeek, 7))],
   ];
@@ -55,6 +61,19 @@ export function render() {
     ${open.length ? "" : `<div class="empty">No deadlines waiting. Add one and Bloom will count the days for you.</div>`}
     ${done.length ? `<button class="btn ghost small" data-act="toggleDone">${view.showDone ? "Hide" : "Show"} done (${done.length})</button>
       ${view.showDone ? `<section class="card wsec">${done.map(deadlineRow).join("")}</section>` : ""}` : ""}`;
+}
+
+/**
+ * An Exam deadline of module `mid` on `date` was deleted or stopped being that module's exam.
+ * The module's exam date follows another Exam deadline of the module if one remains, otherwise
+ * it is cleared. An exam date set by hand to a different day is left alone.
+ */
+export function releaseExam(mid, date) {
+  const m = D.modules[mid];
+  if (!m || !date || m.exam !== date) return;
+  const exams = deadlinesList().filter(d => d.type === "Exam" && d.module === mid);
+  const next = exams.find(d => d.due.slice(0, 10) >= today()) || exams.at(-1);
+  m.exam = next ? next.due.slice(0, 10) : null;
 }
 
 export function openDeadline(id) {
@@ -74,18 +93,31 @@ export function openDeadline(id) {
     danger: id && { label: "Delete", onClick: async () => {
       if (!await confirmBox("Delete this deadline?", `"${d.title}" will be removed.`)) return;
       delete D.deadlines[id];
+      if (d.type === "Exam") releaseExam(d.module, d.due.slice(0, 10));
       save(); app.refresh();
     } },
     onSubmit: v => {
       const target = id ? D.deadlines[id] : (D.deadlines[uid()] = { done: false, doneAt: null });
+      const was = { type: target.type, module: target.module, date: target.due?.slice(0, 10) };
       Object.assign(target, {
         title: v.title.trim(), module: v.module || null, type: v.type,
         due: v.date + (v.time ? "T" + v.time : ""), notes: v.notes.trim(),
       });
+      if (was.type === "Exam" && (target.type !== "Exam" || target.module !== was.module)) releaseExam(was.module, was.date);
       const m = D.modules[v.module];
       if (v.type === "Exam" && m && m.exam !== v.date) {
-        m.exam = v.date;
-        toast(`${m.name} exam set to ${fmtWday(v.date)}. Recalls will adapt.`);
+        // the module's exam date follows its Exam deadlines, but a date set by hand in
+        // Settings to another day is hers to keep
+        const followsDeadline = !m.exam
+          || (was.type === "Exam" && was.module === target.module && was.date === m.exam)
+          || Object.values(D.deadlines).some(o => o !== target && o.type === "Exam"
+            && o.module === target.module && o.due.slice(0, 10) === m.exam);
+        if (followsDeadline) {
+          m.exam = v.date;
+          toast(`${m.name} exam set to ${fmtWday(v.date)}. Recalls will adapt.`);
+        } else {
+          toast(`${m.name} keeps the exam date set in Settings, ${fmtWday(m.exam)}.`);
+        }
       }
       save(); app.refresh();
     },

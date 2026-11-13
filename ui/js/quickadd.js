@@ -25,12 +25,14 @@ function dayMonth(day, month, now) {
 }
 
 const W = "(sun|mon|tue|wed|thu|fri|sat|sunday|monday|tuesday|wednesday|thursday|friday|saturday)";
+const WFULL = "(sunday|monday|tuesday|wednesday|thursday|friday|saturday)";
+const WSHORT = "(sun|mon|tue|wed|thu|fri|sat)";
 const M = "(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december)";
 
 /** Each rule takes the regex match and returns the fields it sets, or null to leave the text alone. */
 const RULES = [
   [/\bp([1-4])\b/i, m => ({ prio: Number(m[1]) })],
-  [/(?:^|\s)#([\w-]+)/, m => ({ projectName: m[1].replace(/_/g, " ") })],
+  [/(?:^|\s)#([\p{L}\p{M}\p{N}_-]+)/u, m => ({ projectName: m[1].replace(/_/g, " ") })],
 
   [/\bevery\s+(?:(\d+)\s+)?(day|week|month)s?\b/i, m => ({ recur: { every: Number(m[1] || 1), unit: m[2].toLowerCase() } })],
   [/\bevery\s+weekday\b/i, () => ({ recur: { every: 1, unit: "weekday" } })],
@@ -56,7 +58,10 @@ const RULES = [
     const due = dayMonth(Number(m[1]), Number(m[2]) - 1, now);
     return due && { due };
   }],
-  [new RegExp(`\\b(?:(?:on|next)\\s+)?${W}\\b`, "i"), (m, now) => ({ due: nextWeekday(weekdayIndex(m[1].toLowerCase()), now) })],
+  // a full weekday name anywhere; a short one ("sun", "sat") only after "on"/"next" or as the
+  // last word, so "Buy sun cream" keeps its words. No lookbehind: older macOS webviews reject it.
+  [new RegExp(`\\b(?:(?:on|next)\\s+)?${WFULL}\\b|(?:^|\\s)(?:on|next)\\s+${WSHORT}\\b|(?:^|\\s)${WSHORT}\\s*$`, "i"),
+    (m, now) => ({ due: nextWeekday(weekdayIndex((m[1] || m[2] || m[3]).toLowerCase()), now) })],
 ];
 
 /** Returns { title, prio, due, recur, projectName }; anything not recognised stays in the title. */

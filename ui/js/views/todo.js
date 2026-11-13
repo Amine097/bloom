@@ -10,7 +10,12 @@ const view = { sel: "today", showDone: false };
 const PRIO = { 1: "Priority 1", 2: "Priority 2", 3: "Priority 3", 4: "No priority" };
 const RECUR = [["", "Does not repeat"], ["1day", "Every day"], ["1weekday", "Every weekday"], ["1week", "Every week"], ["2week", "Every 2 weeks"], ["1month", "Every month"]];
 const recurKey = r => (r ? r.every + r.unit : "");
-const recurFromKey = k => (k ? { every: Number(k[0]), unit: k.slice(1) } : null);
+const recurFromKey = k => {
+  const m = /^(\d+)(\D+)$/.exec(k || "");
+  return m ? { every: Number(m[1]), unit: m[2] } : null;
+};
+/** The Repeat choices, plus the task's own repetition when quick-add set one not in the list. */
+const recurOptions = r => (RECUR.some(([k]) => k === recurKey(r)) ? RECUR : [...RECUR, [recurKey(r), recurLabel(r)]]);
 
 const projects = () => Object.entries(D.todo.projects).map(([id, p]) => ({ id, ...p })).sort((a, b) => a.order - b.order);
 const currentProject = () => (view.sel.startsWith("p:") ? view.sel.slice(2) : null);
@@ -140,7 +145,7 @@ function openTask(id, preset = {}) {
         ${field("Due", input("due", t.due, 'type="date"'))}
         ${field("Priority", select("prio", Object.entries(PRIO), t.prio))}
         ${parent ? "" : field("Project", select("project", [["", "Inbox"], ...projects().map(p => [p.id, p.name])], t.project))}
-        ${field("Repeat", select("recur", RECUR, recurKey(t.recur)))}
+        ${field("Repeat", select("recur", recurOptions(t.recur), recurKey(t.recur)))}
       </div>
       ${field("Notes", `<textarea name="notes" rows="2">${esc(t.notes || "")}</textarea>`)}`,
     danger: id && { label: "Delete", onClick: () => removeTask(id) },
@@ -205,6 +210,10 @@ export function toggleTask(id) {
     t.done = !t.done;
     t.doneAt = t.done ? today() : null;
     if (t.done) for (const k of Object.values(D.todo.tasks)) if (k.parent === id && !k.done) { k.done = true; k.doneAt = today(); }
+    // a done task cannot keep an open subtask: reopening one reopens its parent (as it was, with
+    // no step to a next occurrence, so a repeating parent is not moved on)
+    const parent = !t.done && D.todo.tasks[t.parent];
+    if (parent?.done) { parent.done = false; parent.doneAt = null; }
   }
   save(); app.refresh();
 }

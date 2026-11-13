@@ -20,13 +20,14 @@ export function stateOf(l) {
  */
 export function setStep(l, step, day) {
   const cur = stateOf(l);
-  l.recallDue = null; // a manual reschedule only applies to the recall that was pending
+  // Ticking or unticking "quizzed" leaves the pending recall, and so its manual reschedule, alone.
   if (step === "quizzed") {
     if (l.quizzedAt) l.quizzedAt = null;
     else { l.seenAt ??= day; l.quizzedAt = day; }
     return;
   }
   if (step === "seen" && cur === "quizzed") { l.quizzedAt = null; return; }
+  l.recallDue = null; // a manual reschedule only applies to the recall that was pending
   const order = ["todo", "seen", "recall1", "recall2"];
   let target = order.indexOf(step);
   if (step !== "todo" && step === (cur === "quizzed" ? "seen" : cur)) target -= 1;

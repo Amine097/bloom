@@ -91,6 +91,21 @@ test("a manual reschedule wins, and is dropped when the step changes", () => {
   assert.equal(l.recallDue, null);
 });
 
+test("ticking or unticking quizzed keeps a manual reschedule", () => {
+  const l = lecture({ seenAt: "2026-11-01", recallDue: "2026-11-20" });
+  setStep(l, "quizzed", "2026-11-02");
+  assert.equal(l.recallDue, "2026-11-20", "ticking quizzed");
+  setStep(l, "seen", "2026-11-03");
+  assert.equal(stateOf(l), "seen");
+  assert.equal(l.recallDue, "2026-11-20", "un-quizzing by clicking seen");
+  setStep(l, "quizzed", "2026-11-03");
+  setStep(l, "quizzed", "2026-11-04");
+  assert.equal(l.recallDue, "2026-11-20", "unticking quizzed");
+  setStep(l, "seen", "2026-11-05");
+  assert.equal(stateOf(l), "todo");
+  assert.equal(l.recallDue, null, "a step that changes the pending recall still drops it");
+});
+
 test("spreading caps the recalls per day, never moves one earlier, and respects the exam eve", () => {
   const pending = [
     { id: "a", due: "2026-11-01" }, { id: "b", due: "2026-11-05" }, { id: "c", due: "2026-11-11" },
@@ -124,6 +139,31 @@ test("quick add: repeating tasks", () => {
   assert.deepEqual(parseQuick("Water plants every 2 days", now).recur, { every: 2, unit: "day" });
   assert.equal(parseQuick("Water plants every 2 days", now).due, now, "a repeating task with no date starts today");
   assert.deepEqual(parseQuick("Stand-up every weekday", now).recur, { every: 1, unit: "weekday" });
+});
+
+test("quick add: short weekday names are dates only after on/next or as the last word", () => {
+  const now = "2026-11-11"; // a Wednesday
+  assert.deepEqual(parseQuick("Buy sun cream", now),
+    { title: "Buy sun cream", prio: 4, due: null, recur: null, projectName: null });
+  for (const text of ["Sat exam prep", "Wed seminar notes", "Mon pdf review p2"]) {
+    assert.equal(parseQuick(text, now).due, null, text);
+  }
+  assert.equal(parseQuick("Mon pdf review p2", now).title, "Mon pdf review");
+  assert.deepEqual([parseQuick("Buy sun cream on sat", now).title, parseQuick("Buy sun cream on sat", now).due], ["Buy sun cream", "2026-11-14"]);
+  assert.deepEqual([parseQuick("Buy sun cream sat", now).title, parseQuick("Buy sun cream sat", now).due], ["Buy sun cream", "2026-11-14"]);
+  assert.equal(parseQuick("Call mum mon p1 #Family", now).due, "2026-11-16", "last word once the tags are read");
+  assert.equal(parseQuick("Seminar next wed", now).due, "2026-11-18");
+  assert.deepEqual([parseQuick("Meeting monday morning", now).title, parseQuick("Meeting monday morning", now).due], ["Meeting morning", "2026-11-16"], "full names work anywhere");
+  assert.deepEqual([parseQuick("Lab on Friday at noon", now).title, parseQuick("Lab on Friday at noon", now).due], ["Lab at noon", "2026-11-13"]);
+});
+
+test("quick add: project tags may use accented letters", () => {
+  const now = "2026-11-11";
+  assert.deepEqual(parseQuick("Lernen #Prüfung", now),
+    { title: "Lernen", prio: 4, due: null, recur: null, projectName: "Prüfung" });
+  assert.deepEqual([parseQuick("Read ch 2 #Éthique p3", now).title, parseQuick("Read ch 2 #Éthique p3", now).projectName], ["Read ch 2", "Éthique"]);
+  assert.equal(parseQuick("#Thesis_draft-2 outline", now).projectName, "Thesis draft-2");
+  assert.equal(parseQuick("Fix issue#3", now).projectName, null, "a # inside a word is not a tag");
 });
 
 test("a repeating task always moves to a future date", () => {

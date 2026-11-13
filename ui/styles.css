@@ -134,7 +134,8 @@ code { background: var(--accent-soft); color: var(--accent-ink); padding: 1px 6p
 .row.plain { background: transparent; padding-left: 10px; }
 .row-main { flex: 1; min-width: 0; display: grid; gap: 1px; }
 .row-main .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row-main .sub { font-size: 12.5px; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.row-main .sub { font-size: 12.5px; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; overflow-wrap: anywhere; }
+.row-main .sub-text { flex: 1 1 0; min-width: 0; } /* stays on the line of the dot before it and wraps there */
 .row.done .t { text-decoration: line-through; color: var(--muted); font-weight: 500; }
 .mini-row { min-height: 0; padding: 6px 16px; background: transparent; font-size: 13.5px; }
 .mini-row .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -304,10 +305,10 @@ i.s-seen { background: var(--s-seen); } i.s-quizzed { background: var(--s-quizze
 
 /* ---- to-do */
 .todo { display: flex; gap: 26px; align-items: flex-start; }
-.todo-side { width: 216px; flex: none; display: grid; gap: 2px; position: sticky; top: 0; }
+.todo-side { width: 216px; flex: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; position: sticky; top: 0; }
 .todo-main { flex: 1; min-width: 0; }
 .side-item { display: flex; align-items: center; gap: 10px; padding: 8px 11px; border-radius: 11px; font-weight: 600; color: var(--muted); width: 100%; }
-.side-item span:not(.count):not(.dot) { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-item span:not(.count):not(.dot) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-item:hover { background: var(--surface); color: var(--ink); }
 .side-item.on { background: var(--accent-soft); color: var(--accent-ink); }
 .side-item .count { background: transparent; color: var(--muted); }
@@ -374,7 +375,6 @@ input[type="file"]::file-selector-button { font: inherit; font-weight: 700; colo
 .nb-why { border-radius: 14px; padding: 11px 14px; background: var(--surface-2); line-height: 1.5; border-left: 4px solid var(--ok); }
 .nb-why.wrong { border-left-color: var(--late); }
 .nb-why b { margin-right: 6px; }
-.nb-score { font-size: 46px; font-weight: 800; color: var(--accent-ink); line-height: 1; }
 .nb-page:hover { color: var(--accent-ink); background: var(--accent-soft); }
 .nb-gen, .nb-len { margin: 4px 0 0; justify-content: center; }
 .card-b > .nb-gen { justify-content: flex-start; margin: 0; }
@@ -386,6 +386,7 @@ input[type="file"]::file-selector-button { font: inherit; font-weight: 700; colo
 .nb-review { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .nb-review p + p { margin-top: 4px; }
 .nb-rq { font-weight: 600; }
+.nb-score { font-size: 46px; font-weight: 800; color: var(--accent-ink); line-height: 1; }
 .nb-score small { font-size: 22px; color: var(--muted); }
 .nb-warn { border: 2px solid var(--accent-soft); }
 .nb-warn .card-b { padding-top: 18px; }
@@ -400,7 +401,7 @@ input[type="file"]::file-selector-button { font: inherit; font-weight: 700; colo
 /* ---- modal and toast */
 #modal { position: fixed; inset: 0; background: rgba(70, 20, 45, .35); backdrop-filter: blur(3px); display: grid; place-items: center; padding: 20px; z-index: 10; }
 #modal[hidden] { display: none; }
-.modal { background: var(--surface); border-radius: 20px; width: min(520px, 100%); max-height: 100%; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(70, 20, 45, .3); }
+.modal { background: var(--surface); border-radius: 20px; width: min(520px, 100%); max-height: calc(100vh - 40px); display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(70, 20, 45, .3); }
 .modal.wide { width: min(760px, 100%); }
 .modal header { display: flex; align-items: center; justify-content: space-between; padding: 18px 16px 8px 22px; }
 .modal-b { padding: 8px 22px 14px; display: grid; gap: 13px; overflow-y: auto; }

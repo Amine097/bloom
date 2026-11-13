@@ -2,7 +2,7 @@
 // Layout: quick stats along the top, a weekly chart beside the deadlines, then the study queue
 // as a table, then to-dos and modules.
 import { D, save, currentWeek, itemWeek, isLecture, isDone, itemsList, modulesSorted, moduleOf, pendingRecalls, deadlinesList } from "../store.js";
-import { today, addDays, diffDays, fmtLong, fmtWday, fmtDay, weekLabel, relDay } from "../dates.js";
+import { today, addDays, fmtLong, fmtWday, fmtDay, weekLabel, relDay } from "../dates.js";
 import { stateOf, spreadPlan, STATES, LABEL } from "../recall.js";
 import { esc, icon, app, cvar, toast } from "../ui.js";
 import * as courses from "./courses.js";
@@ -64,7 +64,7 @@ export function render() {
   const revised = lectures.filter(l => stateOf(l) === "recall2").length;
 
   const open = deadlinesList().filter(d => !d.done);
-  const nearDeadlines = open.filter(d => diffDays(now, d.due.slice(0, 10)) <= 7);
+  const nearDeadlines = deadlines.dueThisWeek(open, now); // the "This week" group of the Deadlines page
   const tasks = todo.dueTasks();
 
   // ---- row 1: quick stats
@@ -128,7 +128,7 @@ export function render() {
   const put = (it, kind, status, cls) => { if (!queue.has(it.id)) queue.set(it.id, { it, kind, status, cls }); };
   for (const r of dueRecalls) put({ id: r.id, ...r.item }, "recalls", `Recall ${r.n} · ${relDay(r.due, now)}`, r.due < now ? "late" : "now");
   for (const it of week.sort((a, b) => (a.date || "9").localeCompare(b.date || "9"))) if (!isDone(it)) put(it, "week", "This week", "soon");
-  for (const it of behind) put(it, "catchup", `Catch-up · W${itemWeek(it)}`, "");
+  for (const it of behind) put(it, "catchup", itemWeek(it) >= 1 ? `Catch-up · W${itemWeek(it)}` : "Catch-up · before W1", "");
   const counts = { all: queue.size, recalls: 0, week: 0, catchup: 0 };
   for (const q of queue.values()) counts[q.kind]++;
   if (!counts[view.queue]) view.queue = "all";
@@ -149,7 +149,7 @@ export function render() {
           return `<div class="trow" ${cvar(m.color)}>
             <span class="t" title="${esc(it.title)}">${esc(it.title)}</span>
             <span class="cell"><span class="dot"></span>${esc(m.name)}</span>
-            <span class="cell muted">${it.date ? fmtDay(it.date) : itemWeek(it) ? "W" + itemWeek(it) : "—"}</span>
+            <span class="cell muted">${it.date ? fmtDay(it.date) : itemWeek(it) >= 1 ? "W" + itemWeek(it) : "—"}</span>
             <span><span class="badge ${cls}">${status}</span></span>
             ${isLecture(it) ? courses.stepper(it.id, it) : `<button class="check ${it.doneAt ? "on" : ""}" data-act="toggleItem" data-id="${it.id}" aria-label="Done">${icon("check", 14)}</button>`}
           </div>`;

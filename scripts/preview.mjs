@@ -117,7 +117,9 @@ async function ask(req, res) {
 }
 
 createServer(async (req, res) => {
-  const path = decodeURIComponent(new URL(req.url, "http://x").pathname);
+  let path;
+  try { path = decodeURIComponent(new URL(req.url, "http://x").pathname); }
+  catch { res.writeHead(400).end("Bad request"); return; } // a malformed URL must not stop the server
   if (path === "/api/ask") {
     if (req.method === "POST") return ask(req, res);
     res.writeHead(405).end(); return;
