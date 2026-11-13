@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normName, likeness, matchFiles } from "../ui/js/attach-core.js";
+import * as mod from "../ui/js/attach-core.js";
+const { normName, likeness, matchFiles } = mod;
 
 const L = (id, title, pdfName = null) => ({ id, title, pdfName });
 
@@ -37,4 +38,22 @@ test("lectures that already have a PDF are left alone", () => {
 test("an unrelated file matches nothing", () => {
   assert.deepEqual(matchFiles([{ name: "CNS_Module_Companion.pdf" }], [L("a", "Schizophrenia"), L("b", "Vascular disorders of the CNS")]), [{ id: null, how: null }]);
   assert.ok(likeness("Metastasis_I_II.pdf", "Metastasis") > 0.9); // a one-word name needs one word
+});
+
+test("a file name becomes a tidy lecture title", () => {
+  const { titleFromFile } = mod;
+  assert.equal(titleFromFile("AI Biomarkers _part 2_2026.pdf"), "AI Biomarkers part 2");
+  assert.equal(titleFromFile("Llymphoproliferative and plasma cell disorders - 20261103.pdf"), "Llymphoproliferative and plasma cell disorders");
+  assert.equal(titleFromFile("Cancer_treatment_resistance_I_II.pdf"), "Cancer treatment resistance I II");
+  assert.equal(titleFromFile("Tumor immunology copy.pdf"), "Tumor immunology");
+  assert.equal(titleFromFile("neuromuscular diseases.pdf"), "Neuromuscular diseases");
+  assert.equal(titleFromFile("2026.pdf"), "2026");
+});
+
+test("a YYYYMMDD in the file name is its date", () => {
+  const { dateFromFile } = mod;
+  assert.equal(dateFromFile("Llymphoproliferative and plasma cell disorders - 20261103.pdf"), "2026-11-03");
+  assert.equal(dateFromFile("Lecture slides 20261006f.pdf"), "2026-10-06");
+  assert.equal(dateFromFile("Proteomics_2026.pdf"), null);
+  assert.equal(dateFromFile("x 20261399.pdf"), null);
 });

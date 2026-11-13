@@ -116,12 +116,88 @@ async function ask(req, res) {
   }
 }
 
+// ---- POST /api/convert?ext=ppt|pptx|key: slides in, PDF out (convert_to_pdf in the native shell
+// does this with Keynote). Here: Keynote on a Mac, PowerPoint on Windows (and from WSL), else LibreOffice.
+
+/** Runs a program; resolves { code, out, err }, { missing: true } or { timedOut: true }. */
+function runTool(name, args, timeoutMs = TIMEOUT_MS) {
+  return new Promise(resolve => {
+    const child = spawn(name, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    let out = "", err = "", timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; child.kill(); }, timeoutMs);
+    child.stdout.setEncoding("utf8").on("data", c => { out += c; });
+    child.stderr.setEncoding("utf8").on("data", c => { err += c; });
+    child.on("error", e => { clearTimeout(timer); resolve(e.code === "ENOENT" ? { missing: true } : { code: 1, out, err: e.message }); });
+    child.on("close", code => { clearTimeout(timer); resolve(timedOut ? { timedOut: true } : { code: code ?? 1, out, err }); });
+  });
+}
+
+const SLIDE_TYPES = ["ppt", "pptx", "key"];
+const KEYNOTE_EXPORT = `on run argv
+  set inFile to POSIX file (item 1 of argv)
+  set outFile to POSIX file (item 2 of argv)
+  tell application id "com.apple.iWork.Keynote"
+    set doc to open inFile
+    export doc to outFile as PDF
+    close doc saving no
+  end tell
+end run`;
+const POWERPOINT_EXPORT = "& { param($i, $o) $pp = New-Object -ComObject PowerPoint.Application; " +
+  "$p = $pp.Presentations.Open($i, $true, $false, $false); $p.SaveAs($o, 32); $p.Close(); " +
+  "if ($pp.Presentations.Count -eq 0) { $pp.Quit() } }";
+
+const isWsl = process.platform === "linux" && /microsoft/i.test(await readFile("/proc/version", "utf8").catch(() => ""));
+
+/** A fresh folder PowerPoint can reach: the Windows temp folder when running in WSL. */
+async function convertDir() {
+  if (!isWsl) return mkdtemp(join(tmpdir(), "bloom-convert-"));
+  const win = (await runTool("powershell.exe", ["-NoProfile", "-Command", "[IO.Path]::GetTempPath()"], 30_000)).out?.trim();
+  const unix = win && (await runTool("wslpath", ["-u", win], 10_000)).out?.trim();
+  if (!unix) throw new Error("Could not find the Windows temp folder.");
+  return mkdtemp(join(unix, "bloom-convert-"));
+}
+
+const winPath = async p => (isWsl ? (await runTool("wslpath", ["-w", p], 10_000)).out.trim() : p);
+
+async function convert(req, res) {
+  if (!allowed(req)) return sendJson(res, 403, { error: "Not allowed." });
+  const ext = new URL(req.url, "http://x").searchParams.get("ext")?.toLowerCase();
+  if (!SLIDE_TYPES.includes(ext)) return sendJson(res, 400, { error: "Bloom can turn PowerPoint (.ppt, .pptx) and Keynote files into a PDF, not this kind of file." });
+  let dir;
+  try {
+    const body = await readBody(req);
+    dir = await convertDir();
+    const input = join(dir, `slides.${ext}`), output = join(dir, "slides.pdf");
+    await writeFile(input, body);
+    const run = process.platform === "darwin"
+      ? (await writeFile(join(dir, "export.applescript"), KEYNOTE_EXPORT), await runTool("osascript", [join(dir, "export.applescript"), input, output]))
+      : process.platform === "win32" || isWsl
+      ? await runTool(isWsl ? "powershell.exe" : "powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", POWERPOINT_EXPORT, await winPath(input), await winPath(output)])
+      : await runTool("soffice", ["--headless", "--convert-to", "pdf", "--outdir", dir, input]);
+    const pdf = await readFile(output).catch(() => null);
+    if (!pdf || !pdf.subarray(0, 1024).toString("latin1").includes("%PDF-")) {
+      const why = run.missing ? "no program to convert slides was found on this computer" : run.timedOut ? "it took too long" : "the file could not be opened";
+      return sendJson(res, 500, { error: `The slides could not be turned into a PDF${why ? ` (${why})` : ""}. Save them as a PDF instead.` });
+    }
+    res.writeHead(200, { "Content-Type": "application/pdf", "Cache-Control": "no-store" });
+    res.end(pdf);
+  } catch (e) {
+    sendJson(res, 500, { error: e.message || String(e) });
+  } finally {
+    if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 createServer(async (req, res) => {
   let path;
   try { path = decodeURIComponent(new URL(req.url, "http://x").pathname); }
   catch { res.writeHead(400).end("Bad request"); return; } // a malformed URL must not stop the server
   if (path === "/api/ask") {
     if (req.method === "POST") return ask(req, res);
+    res.writeHead(405).end(); return;
+  }
+  if (path === "/api/convert") {
+    if (req.method === "POST") return convert(req, res);
     res.writeHead(405).end(); return;
   }
   if (path === "/api/claude-status") {

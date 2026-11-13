@@ -1,6 +1,7 @@
 //! Native shell for Bloom. The interface (ui/) does all the work; this side only owns the data
 //! file (load, atomic save, one backup per day, export to the Downloads folder), the lecture
-//! PDFs stored beside it in `pdfs/`, and running the Claude Code CLI (install, sign-in, asking).
+//! PDFs stored beside it in `pdfs/`, turning slides into PDFs with Keynote, and running the Claude
+//! Code CLI (install, sign-in, asking).
 
 use std::fs;
 use std::io::{Read, Write};
@@ -8,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::Mutex;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
 
 const DATA: &str = "bloom_data.json";
@@ -328,6 +329,116 @@ fn read_envelope(status: ExitStatus, out: &[u8], err: &[u8]) -> Result<String, S
     Ok(result)
 }
 
+// ---- turning slides (PowerPoint, Keynote) into a PDF, with Keynote
+
+const SLIDE_TYPES: [&str; 3] = ["ppt", "pptx", "key"];
+const CONVERT_TIMEOUT: Duration = Duration::from_secs(4 * 60);
+
+/// Opens the slides in Keynote and exports them as a PDF. The two paths are arguments, never
+/// part of the script. Keynote is quit afterwards only if it was not open before.
+const KEYNOTE_EXPORT: &str = r#"on run argv
+	set inFile to POSIX file (item 1 of argv)
+	set outFile to POSIX file (item 2 of argv)
+	set wasRunning to application id "com.apple.iWork.Keynote" is running
+	tell application id "com.apple.iWork.Keynote"
+		set doc to open inFile
+		try
+			export doc to outFile as PDF
+		on error msg number n
+			close doc saving no
+			if not wasRunning then quit
+			error msg number n
+		end try
+		close doc saving no
+		if not wasRunning then quit
+	end tell
+end run"#;
+
+/// Whether Keynote is installed. Checked first: a script naming a missing app would make macOS
+/// ask her where it is.
+fn keynote_installed() -> bool {
+    let mut places = vec![PathBuf::from("/Applications/Keynote.app")];
+    if let Some(home) = std::env::var_os("HOME") {
+        places.push(PathBuf::from(home).join("Applications/Keynote.app"));
+    }
+    if places.iter().any(|p| p.is_dir()) {
+        return true;
+    }
+    Command::new("/usr/bin/mdfind")
+        .arg("kMDItemCFBundleIdentifier == 'com.apple.iWork.Keynote'")
+        .output()
+        .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
+        .unwrap_or(false)
+}
+
+fn is_pdf(bytes: &[u8]) -> bool {
+    bytes[..bytes.len().min(1024)].windows(5).any(|w| w == b"%PDF-")
+}
+
+/// Converts the slides in `dir` (a fresh folder, removed by the caller) and returns the PDF.
+fn keynote_to_pdf(dir: &Path, ext: &str, bytes: &[u8]) -> Result<Vec<u8>, String> {
+    if !keynote_installed() {
+        return Err("Bloom uses Keynote to turn slides into a PDF, and Keynote is not on this Mac. Install it (free, from the App Store), or save the slides as a PDF from PowerPoint.".into());
+    }
+    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let input = dir.join(format!("slides.{ext}"));
+    let output = dir.join("slides.pdf");
+    fs::write(&input, bytes).map_err(|e| e.to_string())?;
+    // an existing target file is easier for Keynote (a sandboxed app) to write to
+    fs::write(&output, b"").map_err(|e| e.to_string())?;
+    let script = dir.join("export.applescript");
+    fs::write(&script, KEYNOTE_EXPORT).map_err(|e| e.to_string())?;
+    let mut cmd = Command::new("/usr/bin/osascript");
+    cmd.arg(&script).arg(&input).arg(&output);
+    match run_with_timeout(cmd, b"", CONVERT_TIMEOUT) {
+        Err(e) => Err(format!("Could not start Keynote: {e}")),
+        Ok(None) => Err("Keynote took longer than 4 minutes and was stopped. Save the slides as a PDF from PowerPoint instead.".into()),
+        Ok(Some((status, _out, err))) => {
+            let pdf = fs::read(&output).unwrap_or_default();
+            if status.success() && is_pdf(&pdf) {
+                return Ok(pdf);
+            }
+            let detail = tail_text(&err, 200);
+            if detail.contains("-1743") {
+                return Err("Bloom is not allowed to use Keynote. Allow it in System Settings → Privacy & Security → Automation → Bloom, then try again.".into());
+            }
+            if detail.is_empty() {
+                Err("Keynote could not turn this file into a PDF. Save the slides as a PDF from PowerPoint instead.".into())
+            } else {
+                Err(format!("Keynote could not turn this file into a PDF ({detail}). Save the slides as a PDF from PowerPoint instead."))
+            }
+        }
+    }
+}
+
+/// Turns slides into a PDF with Keynote and returns the PDF's bytes. The slides are the raw
+/// request body; their type (ppt, pptx or key) is in the `x-file-ext` header.
+#[tauri::command]
+async fn convert_to_pdf(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected the file bytes".into());
+    };
+    let ext = request
+        .headers()
+        .get("x-file-ext")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !SLIDE_TYPES.contains(&ext.as_str()) {
+        return Err("Bloom can turn PowerPoint (.ppt, .pptx) and Keynote files into a PDF, not this kind of file.".into());
+    }
+    let bytes = bytes.to_vec();
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let dir = data_dir(&app)?.join("convert").join(stamp.to_string());
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = keynote_to_pdf(&dir, &ext, &bytes);
+        let _ = fs::remove_dir_all(&dir);
+        result.map(tauri::ipc::Response::new)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Runs Claude Code, on one lecture PDF when `pdf_id` is given: `prompt` then holds `{{PDF}}`,
 /// replaced here by the PDF's absolute path. Without a PDF the prompt is sent as it is, from an
 /// empty temporary folder. Returns Claude's final text, or an error she can read; "no-claude"
@@ -573,6 +684,7 @@ pub fn run() {
             save_pdf,
             read_pdf,
             delete_pdf,
+            convert_to_pdf,
             ask_claude,
             claude_status,
             claude_install,

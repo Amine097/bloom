@@ -77,6 +77,13 @@ The updater signing key is in `~/.tauri/bloom.key` (never commit it) and in the 
 - A lecture can carry one PDF: `item.pdf` is `{ id, name, size, addedAt }` or `null`. The file is
   Bloom's own copy, `pdfs/<id>.pdf` beside the data file (IndexedDB in the browser preview), all
   through `ui/js/files.js`. PDFs are not part of the daily backups or the exported backup copy.
+- Slides (`.ppt`, `.pptx`, `.key`) are accepted wherever a PDF is and turned into one first:
+  `convert_to_pdf` in the native shell drives Keynote through `osascript` (hence
+  `NSAppleEventsUsageDescription` in `src-tauri/Info.plist` and the apple-events entitlement), and
+  `POST /api/convert` of `scripts/preview.mjs` uses PowerPoint on Windows/WSL in the preview.
+- "Attach slides" in Courses takes many files at once: matched to lectures by original file name
+  (`LECTURE_FILES` in `seed.js`), then by title (`ui/js/attach-core.js`); unmatched files can
+  become new lectures, in a new module if needed.
 - The Notebook makes a study guide and a quiz from a lecture's PDF, kept in `D.notebook[itemId]`.
   It calls the Claude Code CLI installed on her Mac, with her own account, as a hidden background
   process: `ask_claude` in the native shell, `POST /api/ask` of `scripts/preview.mjs` in the

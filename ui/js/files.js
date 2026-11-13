@@ -1,5 +1,7 @@
 // Lecture PDFs. The file itself is kept beside the data file (pdfs/<id>.pdf) in the app, or in
 // IndexedDB in a browser. The data object only carries { id, name, size, addedAt } on the lecture.
+// Slides (PowerPoint, Keynote) are turned into a PDF first: by Keynote in the app (convert_to_pdf
+// in the native shell), by POST /api/convert of scripts/preview.mjs in the browser preview.
 import { uid } from "./store.js";
 import { today } from "./dates.js";
 
@@ -19,8 +21,38 @@ function idb(mode, run) {
   });
 }
 
-/** Copies a chosen file into Bloom and returns the record to put on the lecture. Throws a message she can read. */
+/** Slides Bloom can turn into a PDF. */
+export const SLIDES = /\.(pptx?|key)$/i;
+/** The `accept` of every file input that takes a lecture's slides. */
+export const FILE_ACCEPT = 'accept="application/pdf,.pdf,.ppt,.pptx,.key"';
+
+/** The file as a PDF: a PDF as it is, slides converted. Throws a message she can read. */
+async function asPdf(file) {
+  const kind = file.name.match(SLIDES);
+  if (!kind) return file;
+  if (file.size > MAX_BYTES) throw new Error("Those slides are too large (150 MB at most).");
+  const ext = kind[1].toLowerCase();
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let pdf;
+  try {
+    if (tauri) pdf = await tauri.core.invoke("convert_to_pdf", bytes, { headers: { "x-file-ext": ext } });
+    else {
+      const res = await fetch(`/api/convert?ext=${ext}`, { method: "POST", body: bytes, headers: { "x-bloom-ask": "1" } });
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || `The slides could not be turned into a PDF (${res.status}).`);
+      pdf = await res.arrayBuffer();
+    }
+  } catch (e) {
+    throw new Error(typeof e === "string" ? e : e?.message || String(e));
+  }
+  return new File([pdf], file.name.replace(SLIDES, ".pdf"), { type: "application/pdf" });
+}
+
+/**
+ * Copies a chosen file into Bloom (slides become a PDF first) and returns the record to put on
+ * the lecture. Throws a message she can read.
+ */
 export async function storePdf(file) {
+  file = await asPdf(file);
   if (file.size > MAX_BYTES) throw new Error("That PDF is too large (150 MB at most).");
   const bytes = new Uint8Array(await file.arrayBuffer());
   const head = String.fromCharCode(...bytes.subarray(0, 1024));

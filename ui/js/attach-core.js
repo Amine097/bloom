@@ -71,3 +71,24 @@ export function matchFiles(files, lectures, known = {}) {
   }
   return out;
 }
+
+/** A readable lecture title from a file name: "AI Biomarkers _part 2_2026.pdf" → "AI Biomarkers part 2". */
+export function titleFromFile(name) {
+  const base = String(name).replace(/\.(pdf|pptx?|key)$/i, "");
+  const t = base.replace(/_+/g, " ")
+    .replace(/(?<!\w)(20\d{6}|20\d{2})(?!\w)/g, " ") // 20261103, 2026
+    .replace(/(?<!\w)copy(?!\w)/gi, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s\-–.,;:]+|[\s\-–.,;:]+$/g, "");
+  const out = t || base.trim();
+  return out.charAt(0).toUpperCase() + out.slice(1);
+}
+
+/** The teaching date written in a file name as YYYYMMDD ("… - 20261103.pdf"), or null. */
+export function dateFromFile(name) {
+  const m = String(name).match(/(?<!\d)(20\d{2})(\d{2})(\d{2})(?!\d)/);
+  if (!m) return null;
+  const [, y, mo, d] = m.map(Number);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  return `${m[1]}-${m[2]}-${m[3]}`;
+}

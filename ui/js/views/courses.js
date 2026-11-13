@@ -2,12 +2,10 @@
 import { D, save, uid, currentWeek, itemWeek, isLecture, itemsList, modulesSorted, moduleOf, pendingRecalls } from "../store.js";
 import { today, fmtDay, fmtWday, weekLabel, relDay, weekOf } from "../dates.js";
 import { stateOf, setStep, LABEL } from "../recall.js";
-import { esc, icon, app, openModal, openViewer, confirmBox, field, input, select, cvar, toast } from "../ui.js";
-import { storePdf, pdfUrl, removePdf, fmtSize } from "../files.js";
-import { matchFiles } from "../attach-core.js";
+import { esc, icon, app, openModal, openViewer, confirmBox, field, input, select, cvar, toast, COLORS } from "../ui.js";
+import { storePdf, pdfUrl, removePdf, fmtSize, SLIDES, FILE_ACCEPT } from "../files.js";
+import { matchFiles, titleFromFile, dateFromFile } from "../attach-core.js";
 import { LECTURE_FILES } from "../seed.js";
-
-const PDF_ACCEPT = 'accept="application/pdf,.pdf"';
 
 const view = { module: "all", hideDone: false };
 
@@ -38,7 +36,7 @@ function row(it, recalls) {
     : `<button class="check ${it.doneAt ? "on" : ""}" data-act="toggleItem" data-id="${it.id}" aria-label="Done" aria-pressed="${Boolean(it.doneAt)}">${icon("check", 14)}</button>`;
   const pdf = !lecture ? ""
     : it.pdf ? `<button class="iconbtn pdf" data-act="openPdf" data-id="${it.id}" title="Open ${esc(it.pdf.name)}" aria-label="Open the lecture PDF">${icon("file", 17)}</button>`
-    : `<label class="iconbtn pdf none" title="Attach the lecture PDF">${icon("clip", 17)}<input type="file" ${PDF_ACCEPT} data-change="attachPdf" data-id="${it.id}" aria-label="Attach the lecture PDF" hidden></label>`;
+    : `<label class="iconbtn pdf none" title="Attach the lecture PDF">${icon("clip", 17)}<input type="file" ${FILE_ACCEPT} data-change="attachPdf" data-id="${it.id}" aria-label="Attach the lecture PDF" hidden></label>`;
   return `<div class="row item ${lecture ? "" : "is-task"} ${!lecture && it.doneAt ? "done" : ""}" ${cvar(m.color)}>
     <span class="dot"></span>
     <button class="row-main" data-act="edit" data-id="${it.id}">
@@ -96,7 +94,7 @@ export function render() {
   return `<header class="page-h">
       <div><h1>Courses</h1><p class="muted">Lectures by the week they were taught. Tick each step as you go.</p></div>
       <div class="page-actions">
-        <label class="btn ghost" title="Choose several lecture PDFs at once; Bloom finds the lecture each one belongs to">${icon("clip", 16)} Attach PDFs<input type="file" ${PDF_ACCEPT} multiple data-change="bulkPdf" hidden></label>
+        <label class="btn ghost" title="Choose several lecture PDFs or PowerPoints at once: Bloom finds the lecture each belongs to, or adds them as new lectures">${icon("clip", 16)} Attach slides<input type="file" ${FILE_ACCEPT} multiple data-change="bulkPdf" hidden></label>
         <button class="btn primary" data-act="add">${icon("plus", 16)} Add</button>
       </div>
     </header>
@@ -131,8 +129,8 @@ function editForm(it) {
       ${field("Week", input("week", it.week, 'type="number" min="1" max="60" placeholder="if there is no date"'))}
     </div>
     ${field("Notes", `<textarea name="notes" rows="2">${esc(it.notes || "")}</textarea>`)}
-    ${lecture ? field("Lecture PDF", `<input type="file" name="pdfFile" ${PDF_ACCEPT}>`,
-      it.pdf ? `Attached: ${it.pdf.name} (${fmtSize(it.pdf.size)}). Choosing a file replaces it.` : "One PDF per lecture. Bloom keeps its own copy.") : ""}
+    ${lecture ? field("Lecture PDF", `<input type="file" name="pdfFile" ${FILE_ACCEPT}>`,
+      it.pdf ? `Attached: ${it.pdf.name} (${fmtSize(it.pdf.size)}). Choosing a file replaces it.` : "One PDF per lecture (PowerPoint slides are turned into one). Bloom keeps its own copy.") : ""}
     ${lecture && it.pdf ? `<label class="switch"><input type="checkbox" name="pdfRemove"> Remove the attached PDF</label>` : ""}
     ${dates}`;
 }
@@ -154,6 +152,7 @@ function openEditor(id) {
       if (v.pdfFile?.size && v.kind === "lecture") {
         const button = form.querySelector('[type="submit"]');
         button.disabled = true;
+        if (SLIDES.test(v.pdfFile.name)) toast("Turning the slides into a PDF…");
         try { pdf = await storePdf(v.pdfFile); }
         catch (e) { toast(e.message, "error"); return false; }
         finally { button.disabled = false; }
@@ -180,63 +179,132 @@ function openEditor(id) {
   });
 }
 
-const HOW = { known: "matched by file name", title: "guessed from the title", attached: "already attached" };
+/** A colour no module uses yet, when there is one. */
+const freeColor = () => {
+  const used = new Set(Object.values(D.modules).map(m => m.color));
+  return COLORS.find(c => !used.has(c)) || COLORS[Object.keys(D.modules).length % COLORS.length];
+};
 
-/** Several PDFs at once: Bloom proposes a lecture for each, she checks, then they are attached. */
+const HOW = { known: "matched by file name", title: "guessed from the title", attached: "already attached", none: "no match found" };
+const NEW_MODULE = "new:+";
+
+/**
+ * Several PDFs at once. Bloom proposes a lecture for each file; a file can also become a new
+ * lecture, in a module she has or in a new one (a new course). She checks it all, then it is saved.
+ */
 function openBulk(files) {
   const lectures = itemsList().filter(isLecture);
   const matches = matchFiles(files, lectures.map(l => ({ id: l.id, title: l.title, pdfName: l.pdf?.name ?? null })), LECTURE_FILES);
-  const groups = [...modulesSorted(), { id: null, name: "No module" }]
+  const mods = modulesSorted();
+  const groups = [...mods, { id: null, name: "No module" }]
     .map(m => [m, lectures.filter(l => (l.module ?? null) === m.id || (m.id === null && !D.modules[l.module]))])
     .filter(([, list]) => list.length);
+  const newOptions = (chosen, many = false) => {
+    const what = many ? "New lectures" : "New lecture";
+    return `<optgroup label="${what}">${mods.map(m =>
+      `<option value="new:${m.id}" ${chosen === `new:${m.id}` ? "selected" : ""}>${what} in ${esc(m.name)}</option>`).join("")}
+      <option value="${NEW_MODULE}" ${chosen === NEW_MODULE ? "selected" : ""}>${what} in a new module</option></optgroup>`;
+  };
   const options = chosen => `<option value="">Don't attach</option>` + groups.map(([m, list]) =>
     `<optgroup label="${esc(m.name)}">${list.map(l =>
-      `<option value="${l.id}" ${l.id === chosen ? "selected" : ""}>${esc(l.title)}${l.pdf ? " · has a PDF" : ""}</option>`).join("")}</optgroup>`).join("");
+      `<option value="${l.id}" ${l.id === chosen ? "selected" : ""}>${esc(l.title)}${l.pdf ? " · has a PDF" : ""}</option>`).join("")}</optgroup>`).join("") + newOptions(chosen);
   const found = matches.filter(m => m.how === "known" || m.how === "title").length;
+  const unmatched = matches.filter(m => !m.how).length;
   const rows = files.map((f, i) => {
     const m = matches[i];
     const chosen = m.how === "attached" ? null : m.id;
-    return `<div class="bulk-row ${chosen ? "" : "off"}">
+    return `<div class="bulk-row ${chosen ? "" : "off"}" ${m.how ? "" : "data-free"}>
       <span class="bulk-name"><span class="t" title="${esc(f.name)}">${esc(f.name)}</span>
-      <span class="sub">${m.how ? HOW[m.how] : "no match found"} · ${fmtSize(f.size)}</span></span>
+      <span class="sub">${HOW[m.how || "none"]} · ${fmtSize(f.size)}</span></span>
       <select name="f${i}" aria-label="Lecture for ${esc(f.name)}">${options(chosen)}</select>
+      <label class="bulk-title" hidden><span>New lecture's title</span><input name="t${i}" value="${esc(titleFromFile(f.name))}" maxlength="200"></label>
     </div>`;
   }).join("");
+  const rest = unmatched ? `<label class="field bulk-rest"><span>${unmatched === files.length ? "None of these files match a lecture. Add them as" : `The ${unmatched} file${unmatched === 1 ? "" : "s"} with no match:`}</span>
+      <select name="rest"><option value="">Don't attach</option>${newOptions(null, true)}</select></label>` : "";
   openModal({
-    title: `Attach ${files.length} PDF${files.length === 1 ? "" : "s"}`,
+    title: `Attach ${files.length} file${files.length === 1 ? "" : "s"}`,
     wide: true,
     submit: "Attach",
-    body: `<p class="muted small">Bloom found a lecture for ${found} of them. Check each pair; choosing a lecture that already has a PDF replaces it.</p>
+    body: `<p class="muted small">${found ? `Bloom found a lecture for ${found} of them. ` : ""}Check each one. A file can also become a new lecture, for a new course. Choosing a lecture that already has a PDF replaces it.</p>
+      ${rest}
+      <label class="field bulk-newmod" hidden><span>Name of the new module</span><input name="newModule" placeholder="e.g. Immunology" maxlength="60"></label>
       <div class="bulk">${rows}</div>`,
     onSubmit: async (v, form) => {
-      const pairs = files.map((f, i) => [f, v[`f${i}`]]).filter(([, id]) => id);
-      const ids = pairs.map(([, id]) => id);
+      const pairs = files.map((f, i) => [f, v[`f${i}`], i]).filter(([, to]) => to);
+      const ids = pairs.map(([, to]) => to).filter(to => !to.startsWith("new:"));
       const twice = ids.find((id, i) => ids.indexOf(id) !== i);
       if (twice) { toast(`Two files go to "${D.items[twice].title}". Pick one.`, "error"); return false; }
+      const newModName = (v.newModule || "").trim();
+      if (pairs.some(([, to]) => to === NEW_MODULE) && !newModName) {
+        toast("Give the new module a name.", "error");
+        form.elements.newModule.focus();
+        return false;
+      }
       if (!pairs.length) return;
       const button = form.querySelector('[type="submit"]');
       button.disabled = true;
-      let done = 0;
+      let newModId = null;
+      let attached = 0, created = 0;
       const failed = [];
-      for (const [file, id] of pairs) {
-        button.textContent = `Attaching ${done + 1} of ${pairs.length}…`;
+      for (const [file, to, i] of pairs) {
+        const n = `${attached + created + failed.length + 1} of ${pairs.length}`;
+        button.textContent = SLIDES.test(file.name) ? `Turning slides into a PDF (${n})…` : `Attaching ${n}…`;
         let pdf;
         try { pdf = await storePdf(file); }
         catch (e) { failed.push(`${file.name}: ${e.message}`); continue; }
-        const it = D.items[id];
+        if (to.startsWith("new:")) {
+          let module = to.slice(4);
+          if (to === NEW_MODULE) {
+            if (!newModId) {
+              newModId = uid();
+              D.modules[newModId] = { name: newModName, color: freeColor(), exam: null, order: Date.now() };
+            }
+            module = newModId;
+          }
+          const date = dateFromFile(file.name);
+          const w = date ? weekOf(date, D.settings.semesterStart) : null;
+          D.items[uid()] = {
+            kind: "lecture", module: D.modules[module] ? module : null, title: (v[`t${i}`] || "").trim() || titleFromFile(file.name),
+            week: w >= 1 ? w : null, date, notes: "", order: Date.now() + i,
+            seenAt: null, quizzedAt: null, recall1At: null, recall2At: null, recallDue: null, doneAt: null, pdf,
+          };
+          created++;
+          continue;
+        }
+        const it = D.items[to];
         if (!it) { removePdf(pdf.id); continue; }
         const old = it.pdf;
         it.pdf = pdf;
-        if (old) { removePdf(old.id); delete D.notebook[id]; } // its study guide and quiz came from the old PDF
-        done++;
+        if (old) { removePdf(old.id); delete D.notebook[to]; } // its study guide and quiz came from the old PDF
+        attached++;
       }
       save(); app.refresh();
-      if (done) toast(`${done} PDF${done === 1 ? "" : "s"} attached 📎`);
+      const said = [attached && `${attached} PDF${attached === 1 ? "" : "s"} attached`, created && `${created} new lecture${created === 1 ? "" : "s"} added`].filter(Boolean);
+      if (said.length) toast(`${said.join(", ")} 📎`);
       if (failed.length) toast(`Not attached: ${failed.join("; ")}`, "error");
     },
   });
-  document.querySelector("#modal .bulk").addEventListener("change", e =>
-    e.target.closest(".bulk-row")?.classList.toggle("off", !e.target.value));
+
+  // keep the form in step with the choices: dim skipped rows, show the title of a new lecture and
+  // the new module's name when needed; "rest" sets every unmatched file at once
+  const modal = document.getElementById("modal");
+  const sync = () => {
+    for (const row of modal.querySelectorAll(".bulk-row")) {
+      const value = row.querySelector("select").value;
+      row.classList.toggle("off", !value);
+      row.querySelector(".bulk-title").hidden = !value.startsWith("new:");
+    }
+    const needName = [...modal.querySelectorAll("select")].some(s => s.value === NEW_MODULE);
+    modal.querySelector(".bulk-newmod").hidden = !needName;
+  };
+  modal.querySelector(".modal-b").addEventListener("change", e => {
+    if (e.target.name === "rest") {
+      for (const row of modal.querySelectorAll(".bulk-row[data-free]")) row.querySelector("select").value = e.target.value;
+    }
+    sync();
+  });
+  sync();
 }
 
 export const actions = {
@@ -267,6 +335,7 @@ export const actions = {
   attachPdf: async el => {
     const file = el.files[0];
     if (!file) return;
+    if (SLIDES.test(file.name)) toast("Turning the slides into a PDF…");
     let pdf;
     try { pdf = await storePdf(file); }
     catch (e) { toast(e.message, "error"); el.value = ""; return; }
