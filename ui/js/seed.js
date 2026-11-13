@@ -15,8 +15,8 @@ export const MODULES = [
   { id: "tumor", name: "Tumor Biology", color: "sky", exam: COMBINED_EXAM },
   { id: "kidney", name: "Kidney", color: "plum", exam: COMBINED_EXAM },
   { id: "modelling", name: "Modelling", color: "mint", exam: COMBINED_EXAM },
-  { id: "ltk", name: "LTK", color: "peach", exam: "2026-12-14" },
   { id: "patho", name: "Pathogenesis", color: "mint", exam: "2027-01-08" },
+  { id: "ltk", name: "LTK", color: "peach", exam: "2027-01-14" },
   { id: "micro", name: "Microscopy", color: "lavender", exam: "2027-01-15" },
 ];
 
@@ -86,12 +86,12 @@ const TUMOR = [
   ["Tumor immunology"],
 ];
 
-/** Mondays, Tuesdays, Thursdays and Saturdays before the LTK exam: one video hour each. */
+/** Wednesdays and Saturdays before the LTK exam (14 January): one video hour each. */
 const LTK_DAYS = [
-  "2026-11-16", "2026-11-17", "2026-11-19", "2026-11-21",
-  "2026-11-23", "2026-11-24", "2026-11-26", "2026-11-28",
-  "2026-11-30", "2026-12-01", "2026-12-03", "2026-12-05",
-  "2026-12-07", "2026-12-08", "2026-12-10", "2026-12-12",
+  "2026-11-18", "2026-11-21", "2026-11-25", "2026-11-28",
+  "2026-12-02", "2026-12-05", "2026-12-09", "2026-12-12",
+  "2026-12-16", "2026-12-19", "2026-12-23", "2026-12-26",
+  "2026-12-30", "2027-01-02", "2027-01-06", "2027-01-09",
 ];
 
 export function seedData() {
@@ -115,12 +115,12 @@ export function seedData() {
   const deadlines = {};
   const exam = (id, title, module, due) => { deadlines[id] = { title, module, type: "Exam", due, notes: "", done: false, doneAt: null }; };
   exam("exam-combined", "Combined exam: Blood, Heart, CNS, PK/PD, Pharma, Tumor Biology, Kidney, Modelling", null, COMBINED_EXAM);
-  exam("exam-ltk", "LTK exam", "ltk", "2026-12-14");
   exam("exam-patho", "Pathogenesis exam", "patho", "2027-01-08");
+  exam("exam-ltk", "LTK exam", "ltk", "2027-01-14");
   exam("exam-micro", "Microscopy exam", "micro", "2027-01-15");
 
   // LTK: 20 one-hour videos before the exam, 4 already watched; the other 16 spread over the
-  // four weeks before it, four a week
+  // eight weeks before it, two a week, so they stay light around the 21 December exam
   const projects = { "ltk": { name: "LTK videos", color: "peach", order: 0 } };
   const tasks = {};
   LTK_DAYS.forEach((due, i) => {

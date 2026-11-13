@@ -29,7 +29,7 @@ test("exams: eight modules share the 21 December exam; LTK, Pathogenesis and Mic
   const { modules, deadlines } = seedData();
   const combined = ["heart", "cns", "pharma", "pkpd", "blood", "tumor", "kidney", "modelling"];
   for (const id of combined) assert.equal(modules[id].exam, "2026-12-21", id);
-  assert.equal(modules.ltk.exam, "2026-12-14");
+  assert.equal(modules.ltk.exam, "2027-01-14");
   assert.equal(modules.patho.exam, "2027-01-08");
   assert.equal(modules.micro.exam, "2027-01-15");
   const exams = Object.values(deadlines).filter(d => d.type === "Exam");
