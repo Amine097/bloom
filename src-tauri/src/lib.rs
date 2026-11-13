@@ -328,20 +328,31 @@ fn read_envelope(status: ExitStatus, out: &[u8], err: &[u8]) -> Result<String, S
     Ok(result)
 }
 
-/// Runs Claude Code on one lecture PDF. `prompt` holds `{{PDF}}`, replaced here by the PDF's
-/// absolute path. Returns Claude's final text, or an error she can read; "no-claude" means the
-/// CLI could not be found.
+/// Runs Claude Code, on one lecture PDF when `pdf_id` is given: `prompt` then holds `{{PDF}}`,
+/// replaced here by the PDF's absolute path. Without a PDF the prompt is sent as it is, from an
+/// empty temporary folder. Returns Claude's final text, or an error she can read; "no-claude"
+/// means the CLI could not be found.
 #[tauri::command]
-async fn ask_claude(app: AppHandle, pdf_id: String, prompt: String) -> Result<String, String> {
-    let file = pdf_path(&app, &pdf_id)?;
-    if !file.is_file() {
-        return Err("The PDF of this lecture is missing. Attach it again from Courses.".into());
-    }
-    let dir = match file.parent() {
-        Some(d) => d.to_path_buf(),
-        None => return Err("invalid file path".into()),
+async fn ask_claude(app: AppHandle, pdf_id: Option<String>, prompt: String) -> Result<String, String> {
+    let (dir, prompt) = match pdf_id {
+        Some(id) => {
+            let file = pdf_path(&app, &id)?;
+            if !file.is_file() {
+                return Err("The PDF of this lecture is missing. Attach it again from Courses.".into());
+            }
+            let dir = match file.parent() {
+                Some(d) => d.to_path_buf(),
+                None => return Err("invalid file path".into()),
+            };
+            (dir, prompt.replace("{{PDF}}", &file.to_string_lossy()))
+        }
+        None => {
+            // nothing of hers to read: Claude starts in a folder that holds no file
+            let dir = std::env::temp_dir().join("bloom-ask");
+            fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            (dir, prompt)
+        }
     };
-    let prompt = prompt.replace("{{PDF}}", &file.to_string_lossy());
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         let bin = find_claude().ok_or_else(|| "no-claude".to_string())?;
         let mut cmd = Command::new(&bin);

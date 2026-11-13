@@ -9,11 +9,13 @@ const page = (ic, title, lead, points) => `<header class="page-h"><div><h1>${tit
     <ul>${points.map(p => `<li>${p}</li>`).join("")}</ul>
   </section>`;
 
-export const planner = {
-  render: () => page("spark", "Planner", "One button to plan your week.", [
+export const render = () => page("spark", "Planner", "One button to plan your week.", [
     "Bloom reads your lectures, recalls, deadlines and to-dos",
     "It proposes a week that fits, and you adjust it",
     "It runs on your own Claude account",
-  ]),
-  actions: {},
-};
+]);
+
+export const actions = {};
+
+/** Called once by main.js when the app has started and the data is loaded. */
+export function onStart() {}

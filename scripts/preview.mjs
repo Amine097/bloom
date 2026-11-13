@@ -101,14 +101,14 @@ async function ask(req, res) {
   try {
     const body = await readBody(req);
     const n = Number(new URL(req.url, "http://x").searchParams.get("n"));
-    if (!Number.isInteger(n) || n <= 0 || n >= body.length) return send(400, { error: "Bad request" });
+    if (!Number.isInteger(n) || n <= 0 || n > body.length) return send(400, { error: "Bad request" });
     const prompt = body.subarray(0, n).toString("utf8");
-    const pdf = body.subarray(n);
-    if (!pdf.subarray(0, 1024).includes("%PDF-")) return send(400, { error: "That file is not a PDF." });
+    const pdf = body.subarray(n); // empty when the question comes with no PDF
+    if (pdf.length && !pdf.subarray(0, 1024).includes("%PDF-")) return send(400, { error: "That file is not a PDF." });
     dir = await mkdtemp(join(tmpdir(), "bloom-ask-"));
     const file = join(dir, "lecture.pdf");
-    await writeFile(file, pdf);
-    send(200, { result: await runClaude(dir, prompt.replaceAll(PDF_TOKEN, file)) });
+    if (pdf.length) await writeFile(file, pdf);
+    send(200, { result: await runClaude(dir, pdf.length ? prompt.replaceAll(PDF_TOKEN, file) : prompt) });
   } catch (e) {
     send(e.code === "no-claude" ? 503 : 500, { error: e.message || String(e) });
   } finally {

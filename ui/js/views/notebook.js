@@ -6,7 +6,9 @@ import { today, relDay, fmtDay } from "../dates.js";
 import { setStep } from "../recall.js";
 import { esc, icon, app, openViewer, confirmBox, cvar, toast, select } from "../ui.js";
 import { pdfUrl } from "../files.js";
-import { askAboutPdf, assistantStatus } from "../assistant.js";
+import { runJob, isRunning, setupNeeded } from "./notebook-jobs.js";
+import { cardsTab } from "./notebook-cards.js";
+import { chatTab } from "./notebook-chat.js";
 import {
   guidePrompt, quizPrompt, parseGuide, parseQuiz, mergeQuestions, pickSession, shuffled,
   withAnswer, withSession, BANK_MAX,
@@ -24,10 +26,13 @@ const LEVEL_NAME = { recall: "Recall", understanding: "Understanding", applicati
  *          retry, done, score, total, missed: [question ids] }
  */
 const view = { sel: null, tab: "guide", play: null, len: 10, genCount: 10, genLevel: "mixed", showBank: false };
-/** "<lectureId>:guide" or "<lectureId>:quiz" while Claude is working on it. */
-const running = new Set();
-/** null, or why Claude cannot be used yet: "missing" (not installed) or "signedout". */
-let setup = null;
+/**
+ * Tabs built in their own files, shown after "Study guide" and "Quiz". Each one is
+ * { id, label, render(lectureId), actions, onKey?(event, lectureId) }; its action names are its own.
+ * A tab shows a spinner while the job "<lectureId>:<tab id>" runs (see notebook-jobs.js).
+ */
+const EXTRA_TABS = [cardsTab, chatTab];
+const extraTab = () => EXTRA_TABS.find(t => t.id === view.tab) || null;
 
 const KIND = {
   guide: { name: "study guide", parse: parseGuide },
@@ -35,7 +40,6 @@ const KIND = {
 };
 
 const notes = id => D.notebook[id] || {};
-const isRunning = (id, kind) => running.has(`${id}:${kind}`);
 /** The lecture's question bank, or null when it has none. */
 const bankOf = id => {
   const z = notes(id).quiz;
@@ -47,9 +51,6 @@ const activePlay = () => {
   const p = view.play;
   return p && p.lecture === view.sel && p.quiz === bankOf(view.sel) ? p : null;
 };
-
-/** Re-renders only when the Notebook is on screen, so a finished job never disturbs another view. */
-const refreshIfHere = () => { if (document.getElementById("main")?.dataset.view === "notebook") app.refresh(); };
 
 /** Lectures that have a PDF, grouped by module in the usual module order. */
 function groups() {
@@ -272,6 +273,8 @@ export function render() {
   if (!all.some(it => it.id === view.sel)) view.sel = all[0].id;
   const it = all.find(x => x.id === view.sel);
   const m = moduleOf(it);
+  const setup = setupNeeded();
+  const extra = extraTab();
 
   const warn = setup ? `<section class="card nb-warn"><div class="card-b">
       <p><b>${setup === "missing" ? "Claude is not set up yet." : "Claude is not signed in."}</b></p>
@@ -295,11 +298,11 @@ export function render() {
             <button class="btn ghost small" data-act="openPdf">${icon("file", 15)} Open the PDF</button>
           </div>
           <div class="card-b"><div class="toolbar nb-tabs">
-            ${[["guide", "Study guide"], ["quiz", "Quiz"]].map(([k, l]) =>
+            ${[["guide", "Study guide"], ["quiz", "Quiz"], ...EXTRA_TABS.map(t => [t.id, t.label])].map(([k, l]) =>
               `<button class="chip ${view.tab === k ? "on" : ""}" data-act="tab" data-tab="${k}" aria-pressed="${view.tab === k}">${l}${isRunning(it.id, k) ? ' <span class="nb-spin small" aria-hidden="true"></span>' : ""}</button>`).join("")}
           </div></div>
         </section>
-        ${view.tab === "quiz" ? quizTab(it.id) : guideTab(it.id)}
+        ${extra ? extra.render(it.id) : view.tab === "quiz" ? quizTab(it.id) : guideTab(it.id)}
       </div>
     </div>`;
 }
@@ -334,39 +337,9 @@ function store(id, kind, data, title) {
 }
 
 /** Asks Claude for a study guide or quiz questions. Runs in the background; what exists stays usable meanwhile. */
-async function generate(id, kind) {
-  const key = `${id}:${kind}`;
-  const it = D.items[id];
-  if (running.has(key) || !it?.pdf) return;
-  const pdfId = it.pdf.id;
-  const prompt = promptFor(id, kind);
-  running.add(key);
-  refreshIfHere();
-  try {
-    // do not start when Claude is not set up; a failed check does not block (the run reports its own errors)
-    const s = await assistantStatus().catch(() => null);
-    if (s && !s.loggedIn) {
-      setup = s.installed ? "signedout" : "missing";
-      return;
-    }
-    if (s) setup = null;
-    const text = await askAboutPdf(pdfId, prompt);
-    const data = KIND[kind].parse(text);
-    setup = null;
-    const now = D.items[id];
-    if (!now || now.pdf?.id !== pdfId) return; // the lecture or its PDF changed meanwhile
-    const msg = store(id, kind, data, now.title);
-    save();
-    toast(msg);
-  } catch (e) {
-    if (e?.code === "no-claude") {
-      setup = "missing";
-      toast("Claude Code is not installed on this Mac.", "error");
-    } else toast(e?.message || String(e), "error");
-  } finally {
-    running.delete(key);
-    refreshIfHere();
-  }
+function generate(id, kind) {
+  if (isRunning(id, kind) || !D.items[id]?.pdf) return;
+  runJob(id, kind, promptFor(id, kind), (text, now) => store(id, kind, KIND[kind].parse(text), now.title));
 }
 
 function startSession(items, retry) {
@@ -412,6 +385,8 @@ function next() {
 
 /** Keyboard during a session: 1–4 or A–D answers, Enter or Space goes on. Called by main.js. */
 export function onKey(e) {
+  const extra = extraTab();
+  if (extra) { extra.onKey?.(e, view.sel); return; }
   const p = activePlay();
   if (!p || p.done || view.tab !== "quiz") return;
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -431,6 +406,7 @@ export function onKey(e) {
 }
 
 export const actions = {
+  ...Object.assign({}, ...EXTRA_TABS.map(t => t.actions)),
   select: el => { view.sel = el.dataset.id; app.refresh(); },
   tab: el => { view.tab = el.dataset.tab; app.refresh(); },
   goCourses: () => app.go("courses"),

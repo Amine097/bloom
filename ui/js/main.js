@@ -8,7 +8,7 @@ import * as deadlines from "./views/deadlines.js";
 import * as courses from "./views/courses.js";
 import * as settings from "./views/settings.js";
 import * as notebook from "./views/notebook.js";
-import { planner } from "./views/soon.js";
+import * as planner from "./views/planner.js";
 import { mountScene } from "./scene.js";
 
 const VIEWS = {
@@ -186,6 +186,7 @@ async function start() {
     try { app.version = await window.__TAURI__.app.getVersion(); } catch { /* shown as blank */ }
   }
   refresh();
+  planner.onStart();
   if (!D.settings.welcomed) welcome();
   else checkUpdate();
 }

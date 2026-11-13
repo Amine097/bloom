@@ -327,6 +327,16 @@ i.s-seen { background: var(--s-seen); } i.s-quizzed { background: var(--s-quizze
 .task.dragging { opacity: .4; }
 .task.drop { box-shadow: inset 0 2px 0 var(--accent); }
 
+/* ---- notebook: flashcards (.nbc-*) */
+
+/* ---- notebook: ask (.nba-*) */
+
+/* ---- notebook: module quiz (.nbm-*) */
+
+/* ---- planner (.pl-*) */
+
+/* ---- settings: assistants (.as-*) */
+
 /* ---- coming soon */
 .coming { padding: 46px 30px; text-align: center; display: grid; gap: 10px; justify-items: center; }
 .coming-ic { width: 68px; height: 68px; border-radius: 22px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; }

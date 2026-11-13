@@ -47,6 +47,34 @@ export async function askAboutPdf(pdfId, prompt) {
   return reply.result;
 }
 
+/**
+ * Sends `prompt` to Claude Code with no file attached, and returns Claude's final text.
+ * Throws like askAboutPdf().
+ */
+export async function askAssistant(prompt) {
+  if (tauri) {
+    try { return await tauri.core.invoke("ask_claude", { pdfId: null, prompt }); }
+    catch (e) { throw failure(e?.message ?? e); }
+  }
+  const body = new TextEncoder().encode(prompt);
+  let res;
+  try {
+    // `n` equal to the body length means: no PDF after the prompt
+    res = await fetch(`/api/ask?n=${body.length}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream", "X-Bloom-Ask": "1" },
+      body,
+    });
+  } catch {
+    throw new Error("Could not reach the preview server. Is `npm run preview` still running?");
+  }
+  let reply;
+  try { reply = await res.json(); }
+  catch { throw new Error(`The preview server gave no answer (HTTP ${res.status}).`); }
+  if (!res.ok || typeof reply.result !== "string") throw failure(reply.error || `HTTP ${res.status}`);
+  return reply.result;
+}
+
 const statusOf = s => ({
   installed: Boolean(s?.installed),
   loggedIn: Boolean(s?.installed && s?.loggedIn),
