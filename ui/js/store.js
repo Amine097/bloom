@@ -2,6 +2,7 @@
 import { today, weekOf, addDays } from "./dates.js";
 import { nextRecall, stateOf } from "./recall.js";
 import { seedData } from "./seed.js";
+import { migrateQuiz } from "./notebook-core.js";
 
 const KEY = "bloom_data";
 const tauri = window.__TAURI__;
@@ -28,7 +29,13 @@ function migrate(data) {
   data.todo.tasks ??= {};
   // v2: a lecture can carry one PDF, { id, name, size, addedAt }; the file itself is in files.js
   for (const it of Object.values(data.items)) it.pdf ??= null;
-  data.version = 2;
+  // v3: a lecture's quiz is a bank of questions, each with its own history (see notebook-core.js)
+  for (const nb of Object.values(data.notebook)) {
+    if (!nb?.quiz) continue;
+    const quiz = migrateQuiz(nb.quiz);
+    if (quiz) nb.quiz = quiz;
+  }
+  data.version = 3;
   return data;
 }
 

@@ -94,6 +94,13 @@ function bindEvents() {
     const el = e.target.closest("#main [data-input]");
     if (el) handler(el.dataset.input)?.(el, e);
   });
+  // shortcuts belong to the view on screen (its `onKey`), never while a dialog or the PDF viewer is open
+  document.addEventListener("keydown", e => {
+    if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+    if (!$("#modal").hidden || !$("#viewer").hidden) return;
+    if (e.target.closest?.("input, select, textarea, [contenteditable]")) return;
+    VIEWS[current].mod.onKey?.(e);
+  });
   document.addEventListener("submit", e => {
     const form = e.target.closest("#main [data-submit]");
     if (!form) return;

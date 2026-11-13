@@ -375,6 +375,17 @@ input[type="file"]::file-selector-button { font: inherit; font-weight: 700; colo
 .nb-why.wrong { border-left-color: var(--late); }
 .nb-why b { margin-right: 6px; }
 .nb-score { font-size: 46px; font-weight: 800; color: var(--accent-ink); line-height: 1; }
+.nb-page:hover { color: var(--accent-ink); background: var(--accent-soft); }
+.nb-gen, .nb-len { margin: 4px 0 0; justify-content: center; }
+.card-b > .nb-gen { justify-content: flex-start; margin: 0; }
+.nb-hist { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.nb-bank .row { margin: 0 0 8px; }
+.nb-bank .row-main .t { white-space: normal; line-height: 1.4; }
+.nb-bank .row .pill { background: var(--surface); }
+.nb-h { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.nb-review { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.nb-review p + p { margin-top: 4px; }
+.nb-rq { font-weight: 600; }
 .nb-score small { font-size: 22px; color: var(--muted); }
 .nb-warn { border: 2px solid var(--accent-soft); }
 .nb-warn .card-b { padding-top: 18px; }
@@ -383,7 +394,7 @@ input[type="file"]::file-selector-button { font: inherit; font-weight: 700; colo
 .as-working .nb-spin { flex: none; }
 .as-error { color: var(--late); font-size: 13.5px; overflow-wrap: anywhere; }
 .as-btns { align-items: center; }
-@media (max-width: 1040px) { .nb { flex-direction: column; } .nb-side { width: 100%; position: static; } }
+@media (max-width: 1040px) { .nb { flex-direction: column; } .nb-side { width: 100%; position: static; } .nb-main { width: 100%; } }
 @media (prefers-reduced-motion: reduce) { .nb-spin { animation-duration: 3s; } }
 
 /* ---- modal and toast */

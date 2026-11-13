@@ -63,7 +63,7 @@ export function seedData() {
   add("cns", CNS);
 
   return {
-    version: 2,
+    version: 3,
     settings: { name: "", semesterStart: "2026-09-14", recall1: 7, recall2: 14, maxRecallsPerDay: 4, theme: "auto", background: "nature", welcomed: false },
     modules,
     items,

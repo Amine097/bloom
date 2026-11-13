@@ -81,4 +81,9 @@ The updater signing key is in `~/.tauri/bloom.key` (never commit it) and in the 
   It calls the Claude Code CLI installed on her Mac, with her own account, as a hidden background
   process: `ask_claude` in the native shell, `POST /api/ask` of `scripts/preview.mjs` in the
   browser preview. Prompts and answer checking are in `ui/js/notebook-core.js`.
+- A lecture's quiz is a question bank (at most 60), not a fixed set: each question has an `id`, a
+  `level` (recall / understanding / application) and its own history (`seen`, `right`, `lastSeen`,
+  `lastRight`); the quiz also keeps `best` and the last 10 `sessions`. The full shape is at the
+  top of the quiz section of `notebook-core.js`. A session draws a few questions (never asked and
+  missed last time first) and shuffles their options; the stored option order never changes.
 - The Planner is a placeholder. It will call the Claude Code CLI the same way.

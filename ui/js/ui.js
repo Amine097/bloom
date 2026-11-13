@@ -88,14 +88,18 @@ export function confirmBox(title, message, okLabel = "Delete") {
 
 let viewerUrl = null;
 
-/** Shows a PDF over the whole window. `url` is an object URL; it is released when the viewer closes. */
-export function openViewer(title, url) {
+/**
+ * Shows a PDF over the whole window, at `page` when given. `url` is an object URL; it is released
+ * when the viewer closes.
+ */
+export function openViewer(title, url, page = null) {
   closeViewer();
   viewerUrl = url;
+  const at = Number.isInteger(page) && page > 0 ? `#page=${page}` : "";
   $("#viewer").innerHTML = `
     <div class="viewer" role="dialog" aria-modal="true" aria-label="${esc(title)}">
-      <header><b>${esc(title)}</b><button type="button" class="iconbtn" data-viewer="close" aria-label="Close">${icon("close")}</button></header>
-      <iframe src="${url}" title="${esc(title)}"></iframe>
+      <header><b>${esc(title)}${at ? ` <span class="muted">· page ${page}</span>` : ""}</b><button type="button" class="iconbtn" data-viewer="close" aria-label="Close">${icon("close")}</button></header>
+      <iframe src="${esc(url + at)}" title="${esc(title)}"></iframe>
     </div>`;
   $("#viewer").hidden = false;
   $("#viewer button").focus();
