@@ -606,7 +606,8 @@ input[type="file"]::file-selector-button { font: inherit; font-weight: 700; colo
 [data-bg="nature"] #nav .bubble:not(.tint) { background: rgba(255, 255, 255, .72); }
 [data-bg="nature"] #nav .profile b { color: #3b2130; }
 [data-bg="nature"] #nav .profile small { color: #3f4f3a; font-weight: 600; }
-[data-theme="dark"][data-bg="nature"] #nav { background: linear-gradient(180deg, #1f3a78 0%, #3a2f7a 28%, #6a2f72 58%, #3b3a6c 78%, #1c4a4a 100%); }
+/* the night sky of the dark meadow (--sky1..3), a little richer: indigo-plum at the top, rose-plum, then the dark green hill */
+[data-theme="dark"][data-bg="nature"] #nav { background: linear-gradient(180deg, #241c44 0%, #33204a 28%, #5a2a5c 58%, #3e2a4e 78%, #1c4a44 100%); }
 [data-theme="dark"][data-bg="nature"] #nav .nav-item:not([aria-current]) { color: #ecd2e2; }
 [data-theme="dark"][data-bg="nature"] #nav .nav-item:not([aria-current]):hover { background: rgba(255, 255, 255, .12); color: #fff; }
 [data-theme="dark"][data-bg="nature"] #nav .bubble:not(.tint) { background: rgba(255, 255, 255, .14); color: #f3d3e4; }
