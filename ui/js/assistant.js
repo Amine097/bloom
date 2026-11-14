@@ -38,10 +38,13 @@ async function previewJson(url, init) {
   return { res, reply };
 }
 
-/** Runs `prompt` (already adapted) on `who`, with the PDF `pdfId` or none. Returns the final text. */
-async function runOn(who, pdfId, prompt) {
+/**
+ * Runs `prompt` (already adapted) on `who`, with the PDF `pdfId` or none. Returns the final text.
+ * `schemas`: the assistant gets more steps, more effort and more time (see claudeArgs() in notebook-core.js).
+ */
+async function runOn(who, pdfId, prompt, schemas) {
   if (tauri) {
-    try { return await tauri.core.invoke(who === "codex" ? "ask_codex" : "ask_claude", { pdfId, prompt }); }
+    try { return await tauri.core.invoke(who === "codex" ? "ask_codex" : "ask_claude", { pdfId, prompt, schemas }); }
     catch (e) { throw failure(e?.message ?? e); }
   }
   // body = the prompt (UTF-8) followed by the PDF bytes; `n` says where the prompt ends (equal to
@@ -52,7 +55,7 @@ async function runOn(who, pdfId, prompt) {
     try { body = new Blob([head, await pdfBlob(pdfId)]); }
     catch { throw new Error("The PDF of this lecture is missing. Attach it again from Courses."); }
   }
-  const { res, reply } = await previewJson(`/api/ask?n=${head.length}&via=${who}`, {
+  const { res, reply } = await previewJson(`/api/ask?n=${head.length}&via=${who}${schemas ? "&schemas=1" : ""}`, {
     method: "POST",
     headers: { "Content-Type": "application/octet-stream", "X-Bloom-Ask": "1" },
     body,
@@ -99,13 +102,16 @@ async function statusForRun() {
   return assistantStatus().catch(() => null);
 }
 
-async function ask(pdfId, prompt) {
+async function ask(pdfId, prompt, schemas = false) {
   const status = await statusForRun();
   const who = runnerFor(status);
   if (!who) throw failure("no-claude");
-  // the PDF's text goes in the prompt, so the assistant need not read the PDF first
-  if (pdfId) prompt = inlinePdfText(prompt, await pdfText(pdfId));
-  const run = name => runOn(name, pdfId, adaptPrompt(prompt, name, Boolean(pdfId))).then(text => checkAnswer(text, name));
+  schemas = Boolean(pdfId && schemas);
+  // the PDF's text goes in the prompt, so the assistant need not read the PDF first (with schemas
+  // it still looks at every page, for the figures)
+  if (pdfId) prompt = inlinePdfText(prompt, await pdfText(pdfId), { schemas });
+  const run = name => runOn(name, pdfId, adaptPrompt(prompt, name, Boolean(pdfId), { schemas }), schemas)
+    .then(text => checkAnswer(text, name));
   try {
     return await run(who);
   } catch (e) {
@@ -122,9 +128,11 @@ async function ask(pdfId, prompt) {
  * Sends `prompt` to the assistant with the PDF readable by it, and returns its final text.
  * The prompt holds the token {{PDF}}, which is replaced by the absolute path of the PDF. Its
  * instruction to read the PDF is replaced by the PDF's text when it can be extracted (pdftext-core.js).
+ * `schemas`: the prompt was written with schemas (notebook-core.js); the assistant then also looks
+ * at every page of the PDF, with more steps, effort and time.
  * Throws an Error she can read; `error.code` is "no-claude" when no assistant is installed.
  */
-export const askAboutPdf = (pdfId, prompt) => ask(pdfId, prompt);
+export const askAboutPdf = (pdfId, prompt, { schemas = false } = {}) => ask(pdfId, prompt, schemas);
 
 /** Sends `prompt` to the assistant with no file attached, and returns its final text. Throws like askAboutPdf(). */
 export const askAssistant = prompt => ask(null, prompt);

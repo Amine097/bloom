@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  cardsPrompt, parseCards, mergeCards, deckOf, pickCards, withGrade, deckStats, DECK_MAX, GEN_COUNTS,
+  cardsPrompt, parseCards, mergeCards, deckOf, pickCards, withGrade, deckStats, sessionEntry, DECK_MAX, GEN_COUNTS,
 } from "../ui/js/cards-core.js";
 import { PDF_TOKEN } from "../ui/js/notebook-core.js";
 
@@ -130,4 +130,22 @@ test("deckStats counts known, not yet and never seen cards", () => {
   const s = deckStats([at("a"), at("b", { lastRight: false }), at("c", { seen: 0, lastRight: null }), at("d")]);
   assert.deepEqual(s, { total: 4, fresh: 1, known: 2, notYet: 1 });
   assert.deepEqual(deckStats([]), { total: 0, fresh: 0, known: 0, notYet: 0 });
+});
+
+test("sessionEntry counts the cards graded and those she knew, skipping ungraded ones", () => {
+  const grades = [true, false, true];
+  grades[5] = false; // a hole: cards 4 and 5 were never graded
+  assert.deepEqual(sessionEntry("l1", grades, "2026-11-14"), { date: "2026-11-14", lecture: "l1", seen: 4, knew: 2 });
+  assert.equal(sessionEntry("l1", [], "2026-11-14"), null);
+  assert.equal(sessionEntry("l1", [undefined, undefined], "2026-11-14"), null);
+});
+
+test("cardsPrompt with schemas asks for cards on the figures, with the figure and its page on the back", async () => {
+  const { LOOK_LINE } = await import("../ui/js/notebook-core.js");
+  const plain = cardsPrompt("Heart", { count: 10 });
+  const deep = cardsPrompt("Heart", { count: 10, schemas: true });
+  assert.ok(!plain.includes(LOOK_LINE) && !plain.includes("Figures:"));
+  assert.equal(cardsPrompt("Heart", { count: 10, schemas: false }), plain);
+  assert.ok(deep.includes(LOOK_LINE) && deep.includes("at least 5 of the 10") && deep.includes("p. 12)"));
+  assert.ok(deep.includes(PDF_TOKEN) && deep.trimEnd().endsWith('"page": 1}]}'));
 });

@@ -9,6 +9,8 @@ import * as courses from "./views/courses.js";
 import * as settings from "./views/settings.js";
 import * as notebook from "./views/notebook.js";
 import * as planner from "./views/planner.js";
+import * as fiches from "./views/fiches.js";
+import * as progress from "./views/progress.js";
 import { mountScene } from "./scene.js";
 import { backgroundAt, msToNextBlock } from "./background.js";
 
@@ -19,6 +21,8 @@ const VIEWS = {
   courses: { label: "Courses", icon: "book", mod: courses },
   planner: { label: "Planner", icon: "spark", mod: planner },
   notebook: { label: "Notebook", icon: "note", mod: notebook },
+  fiches: { label: "Fiches", icon: "file", mod: fiches },
+  progress: { label: "Progress", icon: "chart", mod: progress },
   settings: { label: "Settings", icon: "gear", mod: settings },
 };
 
@@ -62,7 +66,7 @@ function renderNav() {
   const alerts = counts.todo + counts.deadlines + counts.courses;
   $("#nav").innerHTML = `
     <div class="brand"><span class="logo">${FLOWER}</span><b>Bloom</b></div>
-    <div class="nav-list">${["dashboard", "todo", "deadlines", "courses", "planner", "notebook", "settings"].map(item).join("")}</div>
+    <div class="nav-list">${["dashboard", "todo", "deadlines", "courses", "planner", "notebook", "fiches", "progress", "settings"].map(item).join("")}</div>
     <span class="grow"></span>
     <div class="profile">
       <div class="avatar">${esc(name[0].toUpperCase())}${alerts ? `<span class="count" title="Things waiting today">${alerts}</span>` : ""}</div>

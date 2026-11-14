@@ -182,3 +182,11 @@ test("the preview's fake states", () => {
   assert.equal(mergeStatus(mix.claude, mix.codex).use, "codex");
   assert.equal(fakeStatus("Ready/SignedOut").codex.loggedIn, false);
 });
+
+test("Codex with schemas thinks harder; the prompt stays last on stdin", async () => {
+  const { codexArgs, CODEX_SCHEMAS_ARGS } = await import("../ui/js/assistant-core.js");
+  assert.equal(codexArgs(false), CODEX_ARGS);
+  assert.equal(codexArgs(true), CODEX_SCHEMAS_ARGS);
+  assert.deepEqual(CODEX_SCHEMAS_ARGS.slice(0, CODEX_ARGS.length - 1), CODEX_ARGS.slice(0, -1));
+  assert.deepEqual(CODEX_SCHEMAS_ARGS.slice(-3), ["-c", "model_reasoning_effort=high", "-"]);
+});

@@ -44,7 +44,13 @@ function migrate(data) {
   // D.quizLog keeps the last finished quizzes. Existing questions and scores are all kept.
   for (const nb of Object.values(data.notebook)) if (nb?.quiz) migrateBank(nb.quiz);
   if (!Array.isArray(data.quizLog)) data.quizLog = [];
-  data.version = 5;
+  // v6: every quiz is kept in D.quizLog (no longer only the last 20), each with `by`, its score per
+  // lecture ({ lectureId: [score, total] }; absent on older entries); every flashcard session is
+  // kept in D.cardLog as { date, lecture, seen, knew }; D.fiches holds the study sheets Claude
+  // writes (shape at the top of ui/js/fiches-core.js). Nothing to convert.
+  if (!Array.isArray(data.cardLog)) data.cardLog = [];
+  data.fiches ??= {};
+  data.version = 6;
   return data;
 }
 

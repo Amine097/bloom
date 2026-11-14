@@ -4,16 +4,17 @@
 // src-tauri/src/lib.rs), GET /api/claude-status and /api/codex-status, and POST /api/pdf-text (the
 // text of a lecture PDF, like pdf_text in lib.rs).
 import { createServer } from "node:http";
-import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
+import { readFile, writeFile, mkdtemp, rm, mkdir, readdir } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CLAUDE_ARGS, PDF_TOKEN, readEnvelope } from "../ui/js/notebook-core.js";
-import { CODEX_ARGS, NAMES, readCodexEvents, readCodexLogin } from "../ui/js/assistant-core.js";
+import { PDF_TOKEN, askTimeout, claudeArgs, readEnvelope } from "../ui/js/notebook-core.js";
+import { NAMES, codexArgs, readCodexEvents, readCodexLogin } from "../ui/js/assistant-core.js";
+import { FICHE_ARGS, FICHE_TIMEOUT_MS } from "../ui/js/fiches-core.js";
 
 const root = join(fileURLToPath(new URL(".", import.meta.url)), "..", "ui");
-const types = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json" };
+const types = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json", ".woff2": "font/woff2", ".txt": "text/plain" };
 const port = Number(process.env.PORT) || 4173;
 const MAX_BODY = 160 * 1024 * 1024;
 const TIMEOUT_MS = 5 * 60 * 1000;
@@ -67,16 +68,20 @@ function runCli(name, args, { cwd, input = "", timeoutMs = TIMEOUT_MS } = {}) {
 }
 
 const ASSISTANTS = {
-  claude: { args: CLAUDE_ARGS, read: readEnvelope },
-  codex: { args: CODEX_ARGS, read: readCodexEvents },
+  claude: { args: claudeArgs, read: readEnvelope },
+  codex: { args: codexArgs, read: readCodexEvents },
 };
 
-/** Runs `who` ("claude" or "codex") in `cwd` with the prompt on stdin; resolves with its text. */
-async function runAssistant(who, cwd, prompt) {
+/**
+ * Runs `who` ("claude" or "codex") in `cwd` with the prompt on stdin; resolves with its text.
+ * `schemas`: more steps, effort and time, as ask_claude / ask_codex do in the native shell.
+ */
+async function runAssistant(who, cwd, prompt, schemas = false) {
   const { args, read } = ASSISTANTS[who];
-  const r = await runCli(who, args, { cwd, input: prompt });
+  const limit = askTimeout(schemas);
+  const r = await runCli(who, args(schemas), { cwd, input: prompt, timeoutMs: limit.ms });
   if (r.missing) throw Object.assign(new Error(`no-${who}`), { code: `no-${who}` });
-  if (r.timedOut) throw new Error(`${NAMES[who]} took longer than 5 minutes and was stopped. Try again.`);
+  if (r.timedOut) throw new Error(`${NAMES[who]} took longer than ${limit.words} and was stopped. Try again.`);
   return read(r.out, r.code, r.err);
 }
 
@@ -137,7 +142,8 @@ async function ask(req, res) {
     dir = await mkdtemp(join(tmpdir(), "bloom-ask-"));
     const file = join(dir, "lecture.pdf");
     if (pdf.length) await writeFile(file, pdf);
-    send(200, { result: await runAssistant(who, dir, pdf.length ? prompt.replaceAll(PDF_TOKEN, file) : prompt) });
+    const schemas = query.get("schemas") === "1" && pdf.length > 0;
+    send(200, { result: await runAssistant(who, dir, pdf.length ? prompt.replaceAll(PDF_TOKEN, file) : prompt, schemas) });
   } catch (e) {
     send(e.code === "no-claude" || e.code === "no-codex" ? 503 : 500, { error: e.message || String(e) });
   } finally {
@@ -270,10 +276,136 @@ async function convert(req, res) {
   }
 }
 
+// ---- /api/fiche/*: a generated fiche's folder and its long Claude Code run, like the fiche_*
+// commands of the native shell. Folders live in BLOOM_FICHES_DIR (default: <temp>/bloom-preview-fiches).
+// A run goes on in the background; the page asks for its status (so a reload does not lose it).
+
+const FICHES_DIR = process.env.BLOOM_FICHES_DIR || join(tmpdir(), "bloom-preview-fiches");
+const ficheRuns = new Map(); // id → { child, running, result, error, cancelled }
+const SAFE_ID = /^[A-Za-z0-9]{1,40}$/;
+const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/;
+
+// page `page` of a PDF → PNG on stdout, with pypdfium2 (BLOOM_PYTHON); exits 3 when it is missing
+const SLIDE_PNG = `import sys
+try:
+    import pypdfium2 as pdfium
+except Exception:
+    sys.exit(3)
+pdf = pdfium.PdfDocument(sys.argv[1])
+i = int(sys.argv[2]) - 1
+if i < 0 or i >= len(pdf):
+    sys.exit(4)
+page = pdf[i]
+w, h = page.get_size()
+img = page.render(scale=min(4.0, 1600.0 / max(w, h))).to_pil()
+img.save(sys.argv[3], format="PNG", optimize=True)`;
+
+async function ficheApi(req, res, action) {
+  if (!allowed(req)) return sendJson(res, 403, { error: "Forbidden" });
+  const query = new URL(req.url, "http://x").searchParams;
+  const id = query.get("id") || "";
+  if (!SAFE_ID.test(id)) return sendJson(res, 400, { error: "Bad request" });
+  const dir = join(FICHES_DIR, id);
+  const keyOk = k => /^[A-Za-z0-9]{1,12}$/.test(k || "");
+  try {
+    if (action === "prepare" && req.method === "POST") {
+      const key = query.get("key");
+      if (!keyOk(key)) return sendJson(res, 400, { error: "Bad request" });
+      const pdf = await readBody(req);
+      if (!pdf.subarray(0, 1024).includes("%PDF-")) return sendJson(res, 400, { error: "That file is not a PDF." });
+      await mkdir(join(dir, "slides"), { recursive: true });
+      const file = join(dir, "slides", `${key}.pdf`);
+      await writeFile(file, pdf);
+      const text = await extractText(file);
+      if (text !== null) await writeFile(join(dir, "slides", `${key}.txt`), text);
+      return sendJson(res, 200, { pages: text ? (text.match(/\n--- Page \d+ ---\n/g) || []).length : 0 });
+    }
+    if (action === "start" && req.method === "POST") {
+      if (ficheRuns.get(id)?.running) return sendJson(res, 409, { error: "This fiche is already being written." });
+      const prompt = (await readBody(req)).toString("utf8");
+      await mkdir(dir, { recursive: true });
+      const run = { running: true, result: null, error: null, cancelled: false, child: null };
+      ficheRuns.set(id, run);
+      const child = spawn("claude", FICHE_ARGS, { cwd: dir, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+      run.child = child;
+      let out = "", err = "";
+      const timer = setTimeout(() => { run.timedOut = true; child.kill(); }, FICHE_TIMEOUT_MS);
+      child.stdout.setEncoding("utf8").on("data", c => { out += c; });
+      child.stderr.setEncoding("utf8").on("data", c => { err += c; });
+      child.on("error", e => {
+        clearTimeout(timer);
+        Object.assign(run, { running: false, error: e.code === "ENOENT" ? "no-claude" : e.message, child: null });
+      });
+      child.on("close", code => {
+        clearTimeout(timer);
+        if (!run.running) return;
+        run.running = false;
+        run.child = null;
+        if (run.cancelled) run.error = "cancelled";
+        else if (run.timedOut) run.error = "Claude took longer than 3 hours and was stopped.";
+        else {
+          try { run.result = readEnvelope(out, code ?? 1, err); }
+          catch (e) { run.error = e.message || String(e); }
+        }
+      });
+      child.stdin.on("error", () => { /* reported through the exit code */ });
+      child.stdin.end(prompt);
+      return sendJson(res, 200, { ok: true });
+    }
+    if (action === "status" && req.method === "GET") {
+      const r = ficheRuns.get(id);
+      return sendJson(res, 200, { running: Boolean(r?.running), result: r?.result ?? null, error: r?.error ?? null });
+    }
+    if (action === "cancel" && req.method === "POST") {
+      const r = ficheRuns.get(id);
+      if (r?.running && r.child) { r.cancelled = true; r.child.kill(); }
+      return sendJson(res, 200, { ok: true });
+    }
+    if (action === "files" && req.method === "GET") {
+      const names = await readdir(dir, { withFileTypes: true }).catch(() => []);
+      return sendJson(res, 200, { files: names.filter(d => d.isFile()).map(d => d.name) });
+    }
+    if (action === "file" && req.method === "GET") {
+      const name = query.get("name") || "";
+      if (!SAFE_NAME.test(name) || name.includes("..")) return sendJson(res, 400, { error: "Bad request" });
+      const body = await readFile(join(dir, name)).catch(() => null);
+      if (!body) { res.writeHead(204, { "Cache-Control": "no-store" }); return res.end(); } // not written yet (not an error)
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+      return res.end(body);
+    }
+    if (action === "slide" && req.method === "GET") {
+      const key = query.get("key"), page = Number(query.get("page"));
+      if (!keyOk(key) || !Number.isInteger(page) || page < 1 || page > 9999) return sendJson(res, 400, { error: "Bad request" });
+      const img = join(dir, "img", `${key}-${page}.png`);
+      let png = await readFile(img).catch(() => null);
+      if (!png) {
+        await mkdir(join(dir, "img"), { recursive: true });
+        const r = await runTool(process.env.BLOOM_PYTHON || "python3", ["-I", "-c", SLIDE_PNG, join(dir, "slides", `${key}.pdf`), String(page), img], 60_000);
+        if (r.missing || r.timedOut || r.code !== 0) return sendJson(res, 501, { error: "No tool to draw a PDF page was found on this computer." });
+        png = await readFile(img).catch(() => null);
+        if (!png) return sendJson(res, 501, { error: "The page could not be drawn." });
+      }
+      res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "no-store" });
+      return res.end(png);
+    }
+    if (action === "delete" && req.method === "POST") {
+      const r = ficheRuns.get(id);
+      if (r?.running && r.child) { r.cancelled = true; r.child.kill(); }
+      ficheRuns.delete(id);
+      await rm(dir, { recursive: true, force: true });
+      return sendJson(res, 200, { ok: true });
+    }
+    res.writeHead(405).end();
+  } catch (e) {
+    sendJson(res, 500, { error: e.message || String(e) });
+  }
+}
+
 createServer(async (req, res) => {
   let path;
   try { path = decodeURIComponent(new URL(req.url, "http://x").pathname); }
   catch { res.writeHead(400).end("Bad request"); return; } // a malformed URL must not stop the server
+  if (path.startsWith("/api/fiche/")) return ficheApi(req, res, path.slice("/api/fiche/".length));
   if (path === "/api/ask") {
     if (req.method === "POST") return ask(req, res);
     res.writeHead(405).end(); return;

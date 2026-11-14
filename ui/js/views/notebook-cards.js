@@ -4,9 +4,9 @@
 import { D, save, uid } from "../store.js";
 import { today, relDay } from "../dates.js";
 import { esc, icon, app, confirmBox, toast, select } from "../ui.js";
-import { runJob, isRunning } from "./notebook-jobs.js";
+import { runJob, isRunning, isRunningWithSchemas, withSchemas, schemasToggle, takesAbout } from "./notebook-jobs.js";
 import {
-  cardsPrompt, parseCards, mergeCards, deckOf, pickCards, withGrade, deckStats, DECK_MAX, GEN_COUNTS,
+  cardsPrompt, parseCards, mergeCards, deckOf, pickCards, withGrade, deckStats, sessionEntry, DECK_MAX, GEN_COUNTS,
 } from "../cards-core.js";
 import { shuffled } from "../notebook-core.js";
 
@@ -16,7 +16,7 @@ const LENS = [10, 20];
 /**
  * Survives changes of view and lecture and is never saved: the choices for the next generation
  * and session, and the session being played.
- * play = { lecture, deck, ids: [card ids], i, flipped, grades: [bool], retry, done }
+ * play = { lecture, deck, ids: [card ids], i, flipped, grades: [bool], retry, done, logged }
  */
 const view = { play: null, len: 10, genCount: 10, showList: false };
 
@@ -51,17 +51,21 @@ function genControls(label, room) {
   const asked = Math.min(view.genCount, room);
   return `<div class="toolbar nb-gen">
       ${select("count", GEN_COUNTS.map(n => [n, `${n} cards`]), view.genCount, 'class="pill-select" data-change="cardGenCount" aria-label="How many cards"')}
+      ${schemasToggle()}
       <button class="btn primary" data-act="cardGenerate">${icon("spark", 16)} ${label}</button>
     </div>
     ${asked < view.genCount ? `<p class="small muted">The deck has room for ${room} more, so Claude writes ${asked}.</p>` : ""}`;
 }
 
-const working = lead => `<div class="empty nb-wait" role="status"><span class="nb-spin" aria-hidden="true"></span>
+const working = (lead, schemas) => `<div class="empty nb-wait" role="status"><span class="nb-spin" aria-hidden="true"></span>
   <p class="lead">${lead}</p>
-  <p class="small">This usually takes a minute or two. You can keep using Bloom; the cards will be here when they are done.</p></div>`;
+  <p class="small">${takesAbout(schemas)} You can keep using Bloom; the cards will be here when they are done.</p></div>`;
 
 function emptyCard(id) {
-  if (isRunning(id, KIND)) return `<section class="card">${working("Claude is reading the PDF and writing your flashcards…")}</section>`;
+  if (isRunning(id, KIND)) {
+    const schemas = isRunningWithSchemas(id, KIND);
+    return `<section class="card">${working(`Claude is reading the PDF${schemas ? ", diagrams included," : ""} and writing your flashcards…`, schemas)}</section>`;
+  }
   return `<section class="card"><div class="empty nb-wait">
     <p class="lead">No flashcards yet.</p>
     <p class="small">Claude reads the PDF and writes cards with a question or a term on the front and a short answer on the back, each with its page. You flip them and say whether you knew the answer; the ones you did not know come back first.</p>
@@ -194,13 +198,25 @@ function generate(id) {
   const deck = deckFor(id);
   const n = deck?.cards.length ?? 0;
   if (n >= DECK_MAX) { toast("The deck is full. Delete some cards first.", "error"); return; }
-  const prompt = cardsPrompt(it.title, { count: Math.min(view.genCount, DECK_MAX - n), avoid: (deck?.cards ?? []).map(x => x.front) });
-  runJob(id, KIND, prompt, (text, now) => store(id, parseCards(text), now.title));
+  const schemas = withSchemas();
+  const prompt = cardsPrompt(it.title, { count: Math.min(view.genCount, DECK_MAX - n), avoid: (deck?.cards ?? []).map(x => x.front), schemas });
+  runJob(id, KIND, prompt, (text, now) => store(id, parseCards(text), now.title), { schemas });
+}
+
+/** Adds session `p` to D.cardLog once, when it ends or is left with at least one card graded. */
+function logSession(p) {
+  if (!p || p.logged) return;
+  const entry = sessionEntry(p.lecture, p.grades, today());
+  if (!entry) return;
+  p.logged = true;
+  D.cardLog = [...(D.cardLog || []), entry];
+  save();
 }
 
 function startSession(id, ids, retry) {
   const deck = deckFor(id);
   if (!deck || !ids.length) return;
+  logSession(view.play); // a session left unfinished for this one still counts
   view.play = { lecture: id, deck, ids, i: 0, flipped: false, grades: [], retry, done: false };
   app.refresh();
 }
@@ -219,7 +235,7 @@ function grade(id, knew) {
   if (at === -1) return;
   p.deck.cards[at] = withGrade(p.deck.cards[at], knew, today());
   p.grades[p.i] = knew;
-  if (p.i < p.ids.length - 1) { p.i += 1; p.flipped = false; } else p.done = true;
+  if (p.i < p.ids.length - 1) { p.i += 1; p.flipped = false; } else { p.done = true; logSession(p); }
   save();
   app.refresh();
 }
@@ -258,7 +274,7 @@ const actions = {
   },
   cardFlip: () => flip(sel()),
   cardGrade: el => grade(sel(), el.dataset.knew === "1"),
-  cardStop: () => { view.play = null; app.refresh(); },
+  cardStop: () => { logSession(view.play); view.play = null; app.refresh(); },
   cardToggleList: () => { view.showList = !view.showList; app.refresh(); },
   cardDelete: el => {
     const id = sel(), cid = el.dataset.card, deck = deckFor(id);
@@ -273,7 +289,7 @@ const actions = {
         if (k < p.i) p.i -= 1;
         else if (k === p.i) p.flipped = false;
         if (!p.ids.length) view.play = null;
-        else if (p.i >= p.ids.length) p.done = true;
+        else if (p.i >= p.ids.length) { p.done = true; logSession(p); }
       }
     }
     save(); app.refresh();
@@ -284,6 +300,7 @@ const actions = {
     if (!deck || !await confirmBox("Delete all the cards?",
       `All ${deck.cards.length} flashcards of this lecture are removed, with what you knew of each.`, "Delete all")) return;
     deck.cards = [];
+    logSession(view.play);
     view.play = null;
     view.showList = false;
     save(); app.refresh();

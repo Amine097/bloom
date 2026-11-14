@@ -28,6 +28,13 @@ const WHOLE_LINE = /^Read the whole document\. If it is long, read it in parts \
 export const MAY_READ = "you may use the Read tool on that page of the PDF (with its pages parameter)";
 const whole = () => `Cover the whole document, from its first page to its last.
 The text above was extracted from the PDF file at this path: "${PDF_TOKEN}". It can miss figures, diagrams and the layout of tables: when a page's text is empty or unclear, or a figure on it matters, ${MAY_READ}. Do not read the whole PDF again: the text above is complete.`;
+/**
+ * With schemas (D.settings.schemas): the text is inlined all the same (its exact words), and the
+ * assistant also looks at every page, for the figures. adaptPrompt() rewrites READ_ALL for Codex.
+ */
+export const READ_ALL = "also use the Read tool to look at every page of that PDF, from its first page to its last (with its pages parameter, at most 20 pages at a time)";
+const wholeWithFigures = () => `Cover the whole document, from its first page to its last.
+The text above was extracted from the PDF file at this path: "${PDF_TOKEN}". It leaves out what the figures, diagrams, schemas, tables and graphs show, and they matter here: ${READ_ALL}, and study every figure on them. Use the text above for the exact words.`;
 /** Marks a prompt whose PDF text was inlined (see adaptPrompt() in assistant-core.js). */
 export const INLINED = 'Here is the text of the lecture PDF, page by page ("--- Page n ---" starts page n):';
 
@@ -75,18 +82,21 @@ export function documentText(raw) {
 
 /**
  * `prompt` with the instruction to read the PDF replaced by the PDF's text (`raw`, as pagesOf()
- * reads it), plus a line saying the PDF may still be read for a figure. Unchanged when the prompt
- * has no such instruction or the text is not usable (documentText() is null).
+ * reads it), plus a line saying the PDF may still be read for a figure. With `schemas`, that line
+ * asks instead to look at every page of the PDF as well. Unchanged when the prompt has no such
+ * instruction or the text is not usable (documentText() is null): the assistant then reads the
+ * whole PDF itself, which covers the figures too.
  */
-export function inlinePdfText(prompt, raw) {
+export function inlinePdfText(prompt, raw, { schemas = false } = {}) {
   const text = String(prompt ?? "");
   if (!READ_LINE.test(text)) return text;
   const doc = documentText(raw);
   if (!doc) return text;
+  const after = schemas ? wholeWithFigures : whole;
   // functions as replacements: the PDF's text may hold "$&" and the like
   // the instruction lines first, so that nothing in the PDF's text can be taken for one
   const block = `${INLINED}\n<document>\n${doc}\n</document>`;
   return WHOLE_LINE.test(text)
-    ? text.replace(WHOLE_LINE, () => whole()).replace(READ_LINE, () => block)
-    : text.replace(READ_LINE, () => `${block}\n${whole()}`);
+    ? text.replace(WHOLE_LINE, () => after()).replace(READ_LINE, () => block)
+    : text.replace(READ_LINE, () => `${block}\n${after()}`);
 }

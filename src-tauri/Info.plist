@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Bloom asks Keynote to turn PowerPoint slides into PDFs for your lectures.</string>
+	<string>Bloom asks Keynote (or PowerPoint) to turn slides into PDFs for your lectures.</string>
 </dict>
 </plist>

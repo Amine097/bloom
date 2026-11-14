@@ -311,3 +311,29 @@ test("pickModuleSession is repeatable with the same random source, and does not 
   assert.ok(draws.size > 10, "different seeds give different sessions");
   assert.equal(JSON.stringify(banks), before);
 });
+
+test("with schemas, the prompts also build on the figures; standard ones do not mention them", async () => {
+  const { LOOK_LINE, claudeArgs, askTimeout, CLAUDE_ARGS } = await import("../ui/js/notebook-core.js");
+  for (const [plain, deep] of [
+    [guidePrompt("Heart"), guidePrompt("Heart", { schemas: true })],
+    [quizPrompt("Heart", { count: 6 }), quizPrompt("Heart", { count: 6, schemas: true })],
+  ]) {
+    assert.ok(!plain.includes(LOOK_LINE) && !/figure/i.test(plain.split("Rules:")[1]));
+    assert.ok(deep.includes(LOOK_LINE) && deep.includes(PDF_TOKEN));
+    // the opening lines stay, so the PDF's text can still be inlined
+    assert.ok(deep.includes("Read the whole document. If it is long, read it in parts (at most 20 pages at a time) until you have covered every page.\n"));
+    assert.ok(deep.trimEnd().endsWith("}]}"), "the reply shape stays last");
+  }
+  assert.equal(guidePrompt("Heart", { schemas: false }), guidePrompt("Heart"));
+  const q = quizPrompt("Heart", { count: 6, schemas: true });
+  assert.ok(q.includes("at least 3 of the 6") && q.includes('"why" of such a question') && q.includes("never guess"));
+  assert.ok(quizPrompt("Heart", { count: 1, schemas: true }).includes("at least 1 of the 1"));
+  assert.ok(guidePrompt("Heart", { schemas: true }).includes("6 to 10"));
+  // more steps, more effort, more time; the standard command line is unchanged
+  assert.equal(claudeArgs(false), CLAUDE_ARGS);
+  const deep = claudeArgs(true);
+  assert.equal(deep[deep.indexOf("--max-turns") + 1], "24");
+  assert.equal(deep[deep.indexOf("--effort") + 1], "medium");
+  assert.deepEqual(askTimeout(false), { ms: 5 * 60 * 1000, words: "5 minutes" });
+  assert.deepEqual(askTimeout(true), { ms: 20 * 60 * 1000, words: "20 minutes" });
+});

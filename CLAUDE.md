@@ -78,7 +78,9 @@ The updater signing key is in `~/.tauri/bloom.key` (never commit it) and in the 
   Bloom's own copy, `pdfs/<id>.pdf` beside the data file (IndexedDB in the browser preview), all
   through `ui/js/files.js`. PDFs are not part of the daily backups or the exported backup copy.
 - Slides (`.ppt`, `.pptx`, `.key`) are accepted wherever a PDF is and turned into one first:
-  `convert_to_pdf` in the native shell drives Keynote through `osascript` (hence
+  `convert_to_pdf` in the native shell drives Keynote through `osascript`, then PowerPoint when
+  Keynote fails (each writes the PDF into Bloom's folder, else into its own sandbox folder
+  `~/Library/Containers/<id>/Data/tmp`, read back by Bloom) (hence
   `NSAppleEventsUsageDescription` in `src-tauri/Info.plist` and the apple-events entitlement), and
   `POST /api/convert` of `scripts/preview.mjs` uses PowerPoint on Windows/WSL in the preview.
 - "Attach slides" in Courses takes many files at once: matched to lectures by original file name
@@ -91,6 +93,11 @@ The updater signing key is in `~/.tauri/bloom.key` (never commit it) and in the 
   The PDF's text (page by page) goes straight into the prompt (`ui/js/pdftext-core.js`; `pdf_text` in the
   shell with PDFKit, cached as `pdfs/<id>.txt`; `POST /api/pdf-text` in the preview); the PDF stays readable
   for figures, and a thin or missing text leaves the prompt as before. The CLI runs with `--effort low`.
+  "With schemas" (`D.settings.schemas`, a switch wherever the Notebook generates) also has the
+  assistant read every PDF page itself and build part of what it writes on the figures: 24 turns,
+  `--effort medium`, 20 minutes (`notebook-core.js`, `schemas` argument of `ask_claude`/`ask_codex`).
+- The Progress page (`ui/js/progress-core.js`, `views/progress.js`): marks over time per lecture and
+  module, from `D.quizLog` (each quiz keeps `by`, her score per lecture), the banks and `D.cardLog`.
 - A lecture's quiz is a question bank (at most 60): each question has an `id`, a `level` (recall /
   understanding / application) and its own history (`seen`, `right`, `lastSeen`, `lastRight`,
   `streak`, `lastQuiz`); the bank keeps `quizzes` (how many quizzes included it), `best` and the
@@ -104,6 +111,23 @@ The updater signing key is in `~/.tauri/bloom.key` (never commit it) and in the 
   and `chat` (the Ask tab, `ui/js/chat-core.js`).
 - The Planner asks the assistant once a week for a tickable list of goals, each linked to a
   lecture, recall, deadline or to-do; kept in `D.planner` (shape at the top of `ui/js/planner-core.js`).
+- Fiches (study sheets, `D.fiches`, shape at the top of `ui/js/fiches-core.js`): a module can have
+  any number, uploaded (a PDF through `files.js`) or generated. A generated fiche is written by
+  Claude Code (never Codex) in a folder of its own, `fiches/<id>/` beside the data file: the
+  lecture PDFs are copied into `slides/KEY.pdf` (+ `KEY.txt`), Claude writes `ch*.html`,
+  `front.html`, `plan.md` and `progress.json` (Read/Write/Edit/Glob, `acceptEdits`, effort high,
+  up to 3 hours, resumable with "Continue"). Two phases: optional multiple-choice questions, then
+  writing. Commands `fiche_*` in the native shell, `/api/fiche/*` in `scripts/preview.mjs`
+  (folders in `BLOOM_FICHES_DIR`); running and reading in `ui/js/fiche-run.js`. Bloom lays the
+  HTML out on A4 pages (`ui/js/fiche-render.js`, `ui/fiche.css`, Fira Sans in `ui/fonts/`) to
+  look exactly like the LaTeX companions; Claude writes only content with the documented classes
+  (`MARKUP` in `fiches-core.js`). `<figure class="slide">` is filled with the slide page drawn by
+  PDFKit (`fiche_slide`). `ficheText(id)` gives a fiche's text page by page.
+  Each fiche keeps its own question bank (`D.fiches[id].quiz`, lecture bank shape plus `cursor`)
+  and is ticked in the Notebook's Quiz page beside lectures; in quizzes and `D.quizLog` it stands
+  as the source `"fiche:<id>"` (`ui/js/sources.js`). Claude writes its questions from its text, one
+  window of pages at a time (`ficheWindow`, `ficheQuizPrompt` in `fiches-core.js`), the next window
+  next time; "With schemas" does not apply to fiches.
 - Backgrounds (`settings.background`): "alternate" (default: meadow and cherry blossoms swap every
   two hours, `ui/js/background.js`), "nature", "blossom", "plain"; each has a matching sidebar.
 - Assistants: Claude Code first; Codex (OpenAI's CLI, her ChatGPT account) is the backup while

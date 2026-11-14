@@ -100,3 +100,30 @@ test("Codex is told the text is there and opens the PDF only for a figure", () =
   const before = adaptPrompt(quizPrompt("Heart"), "codex", true);
   assert.ok(before.includes(CODEX_NO_PDF) && !before.includes("already given above"));
 });
+
+test("with schemas the text is inlined and every page is still looked at, for the figures", async () => {
+  const { READ_ALL } = await import("../ui/js/pdftext-core.js");
+  const { LOOK_LINE } = await import("../ui/js/notebook-core.js");
+  for (const prompt of [guidePrompt("Heart", { schemas: true }), quizPrompt("Heart", { schemas: true }), cardsPrompt("Heart", { schemas: true })]) {
+    const out = inlinePdfText(prompt, good, { schemas: true });
+    assert.ok(out.includes(INLINED) && out.includes(READ_ALL) && out.includes(PDF_TOKEN) && out.includes(LOOK_LINE));
+    assert.ok(!out.includes(MAY_READ) && !out.includes("Do not read the whole PDF again"));
+    // the same prompt in standard mode keeps "a glance at a figure when needed"
+    const std = inlinePdfText(prompt, good);
+    assert.ok(std.includes(MAY_READ) && !std.includes(READ_ALL));
+  }
+  // no usable text: the prompt is unchanged, and it already asks to read the whole PDF
+  const p = quizPrompt("Heart", { schemas: true });
+  assert.equal(inlinePdfText(p, "", { schemas: true }), p);
+});
+
+test("Codex with schemas reads the figures' labels with a tool, and the Read tool is not mentioned", async () => {
+  const out = inlinePdfText(quizPrompt("Heart", { schemas: true }), good, { schemas: true });
+  const c = adaptPrompt(out, "codex", true, { schemas: true });
+  assert.ok(!c.includes("Read tool"));
+  assert.ok(c.includes("every page of that PDF file that has a figure") && c.includes("cannot see images"));
+  assert.ok(c.includes("already given above") && !c.includes(CODEX_NO_PDF));
+  assert.equal(adaptPrompt(out, "claude", true, { schemas: true }), out);
+  const notInlined = adaptPrompt(quizPrompt("Heart", { schemas: true }), "codex", true, { schemas: true });
+  assert.ok(notInlined.includes("cannot see images") && notInlined.includes(CODEX_NO_PDF));
+});

@@ -30,6 +30,7 @@ const PATHS = {
   grip: "M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01",
   file: "M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 17h6",
   clip: "M20 11.5l-8.3 8.3a5 5 0 01-7-7L13 4.5a3.3 3.3 0 014.7 4.7l-8.2 8.2a1.7 1.7 0 01-2.4-2.4L14.5 7.6",
+  chart: "M4 20V11M10 20V5M16 20v-6M21 20H3",
 };
 export const icon = (name, size = 18) =>
   `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${PATHS[name]}"/></svg>`;

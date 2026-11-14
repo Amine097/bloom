@@ -1,7 +1,7 @@
 // Which assistant answers (Claude Code or Codex), and reading what the Codex CLI prints.
 // Pure, covered by tests/assistant.test.mjs. The app and the preview server both use it.
 
-import { INLINED, MAY_READ } from "./pdftext-core.js";
+import { INLINED, MAY_READ, READ_ALL } from "./pdftext-core.js";
 
 export const NAMES = { claude: "Claude", codex: "Codex" };
 
@@ -26,23 +26,39 @@ export const isReady = s => Boolean(s?.installed && s?.loggedIn);
 // ---- the prompts
 
 /**
+ * `codex exec` with schemas (D.settings.schemas): the same, thinking harder. The native shell
+ * (lib.rs) adds the same two arguments.
+ */
+export const CODEX_SCHEMAS_ARGS = [...CODEX_ARGS.slice(0, -1), "-c", "model_reasoning_effort=high", "-"];
+export const codexArgs = schemas => (schemas ? CODEX_SCHEMAS_ARGS : CODEX_ARGS);
+
+/** With schemas: how Codex, which cannot see images in its read-only sandbox, gets at the figures. */
+const CODEX_FIGURES = "How to read the figures: you cannot see images here, so for every page with a figure, a diagram, a schema or a table, read its labels, axis titles, legend and table cells with a command-line tool (pdftotext -layout -f n -l n keeps them in place) and work out what it shows from them and the text around it. Only build a question, card or point on a figure when that makes clear what it shows.";
+
+/**
  * The prompts are written for Claude. For Codex: it has no Read tool, so it is told how to read a
  * PDF with the tools it has, and to say so instead of guessing when it cannot. When the PDF's text
  * is already in the prompt (inlinePdfText() of pdftext-core.js), it only opens the PDF for a page
- * whose text is missing or a figure that matters.
+ * whose text is missing or a figure that matters; with `schemas`, for every page with a figure.
  */
-export function adaptPrompt(prompt, who, withPdf) {
+export function adaptPrompt(prompt, who, withPdf, { schemas = false } = {}) {
   const text = String(prompt ?? "");
   if (who !== "codex") return text;
   const plain = text.replace(/Use the Read tool to read/g, "Read")
-    .split(MAY_READ).join("you may look at that page of the PDF file");
+    .split(MAY_READ).join("you may look at that page of the PDF file")
+    .split(READ_ALL).join("also look at every page of that PDF file that has a figure, a diagram, a schema or a table");
   if (!withPdf) return plain;
-  if (plain.includes(INLINED)) return `${plain}
+  const figures = schemas ? `\n${CODEX_FIGURES}` : "";
+  if (plain.includes(INLINED)) {
+    return schemas ? `${plain}
+
+The text of the PDF is already given above: work from it, and look at the PDF file itself for the figures with a command-line tool (for example pdftotext -layout -f n -l n, a short Python script, or on macOS osascript -l JavaScript with PDFKit). Only read files: never create, change or delete any.${figures}` : `${plain}
 
 The text of the PDF is already given above: work from it. Only when a page's text is missing or a figure matters, look at that page of the PDF file with a command-line tool (for example pdftotext -f n -l n, a short Python script, or on macOS osascript -l JavaScript with PDFKit). Only read files: never create, change or delete any.`;
+  }
   return `${plain}
 
-How to read the PDF: it is a PDF file, so extract its text with a command-line tool (for example pdftotext, a short Python script, or on macOS osascript -l JavaScript with PDFKit), page by page so that the page numbers stay right. Only read files: never create, change or delete any.
+How to read the PDF: it is a PDF file, so extract its text with a command-line tool (for example pdftotext, a short Python script, or on macOS osascript -l JavaScript with PDFKit), page by page so that the page numbers stay right. Only read files: never create, change or delete any.${figures}
 If you cannot read the PDF at all, reply with exactly ${CODEX_NO_PDF} and nothing else.`;
 }
 

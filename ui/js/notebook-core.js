@@ -4,13 +4,35 @@
 /** The command line, shared by the dev preview server. The native shell (lib.rs) uses the same flags. */
 export const CLAUDE_ARGS = ["-p", "--output-format", "json", "--no-session-persistence", "--strict-mcp-config", "--allowedTools", "Read", "--max-turns", "8", "--effort", "low"];
 
+// ---- "With schemas": the assistant looks at every page of the PDF, figures included
+//
+// The Notebook generates in one of two ways (D.settings.schemas, false when absent):
+// - standard: the PDF's text is in the prompt (pdftext-core.js), a figure is looked at only when needed;
+// - with schemas: the assistant also reads every page of the PDF itself, and part of what it writes
+//   is built on the figures, diagrams, schemas and tables. Slower and uses more of her quota: more
+//   steps, more effort and a longer time limit (the native shell has the same numbers).
+
+/** The command line with schemas: room to read a long PDF in parts, and more thought. */
+export const CLAUDE_SCHEMAS_ARGS = ["-p", "--output-format", "json", "--no-session-persistence", "--strict-mcp-config", "--allowedTools", "Read", "--max-turns", "24", "--effort", "medium"];
+export const claudeArgs = schemas => (schemas ? CLAUDE_SCHEMAS_ARGS : CLAUDE_ARGS);
+/** How long an assistant may take before it is stopped (ms), and the same in words. */
+export const askTimeout = schemas => (schemas ? { ms: 20 * 60 * 1000, words: "20 minutes" } : { ms: 5 * 60 * 1000, words: "5 minutes" });
+
 /** Where the caller puts the absolute path of the PDF. */
 export const PDF_TOKEN = "{{PDF}}";
 
-const READ = title => `You are helping a university student revise a lecture.
+/** With schemas, the line after the opening's "Read the whole document…" line. */
+export const LOOK_LINE = "Look closely at every page, not only at its words: its figures, diagrams, schemas, tables, graphs and curves matter as much as its text.";
+
+/** With schemas, how a figure becomes a question, a card or a point (`what`: "question", "card"). */
+export const figureRules = what => `- The student will not see the figure: describe in words what is needed (for example "In the pressure-volume loop of the left ventricle, …"), so that the ${what} can be answered by someone who studied the slides; never write "the figure on page n" or "this figure" in it.
+- Only use a figure whose meaning is clear from the slide itself (its labels, axes, legend, title or the text around it); never guess what it shows.`;
+
+const READ = (title, schemas = false) => `You are helping a university student revise a lecture.
 Use the Read tool to read the lecture PDF at this path: "${PDF_TOKEN}"
 The lecture is called ${JSON.stringify(String(title || "Untitled"))}.
-Read the whole document. If it is long, read it in parts (at most 20 pages at a time) until you have covered every page.
+Read the whole document. If it is long, read it in parts (at most 20 pages at a time) until you have covered every page.${schemas ? `
+${LOOK_LINE}` : ""}
 
 Rules:
 - Use only what is in this document. Do not add facts from anywhere else.
@@ -18,14 +40,17 @@ Rules:
 - Page numbers are the page numbers of the PDF file: the first page of the file is page 1.
 - Reply with JSON only: no introduction, no comments, no code fences.`;
 
-export function guidePrompt(title) {
-  return `${READ(title)}
+/** The study guide. `schemas`: also built on the figures (see LOOK_LINE). */
+export function guidePrompt(title, { schemas = false } = {}) {
+  return `${READ(title, schemas)}
 
 Write a study guide with:
 - "summary": what the lecture is about, in 3 to 5 sentences.
-- "points": the 5 to 8 most important points, each in one or two sentences, each with the page it comes from.
+- "points": the ${schemas ? "6 to 10" : "5 to 8"} most important points, each in one or two sentences, each with the page it comes from.
 - "terms": the 6 to 12 key terms, each with a one-line definition.
-
+${schemas ? `
+The figures, diagrams, schemas and tables carry much of this lecture, so at least 3 of the points (when the lecture has that many) say what a figure shows: what a curve or graph shows and why, what a diagram or schema explains step by step, what a table compares. Such a point names the figure by what it shows (for example "The pressure-volume loop shows …") and gives the page of that figure. Only use a figure whose meaning is clear from the slide itself (its labels, axes, legend, title or the text around it); never guess what it shows.
+` : ""}
 The reply must be exactly this shape:
 {"summary": "...", "points": [{"text": "...", "page": 1}], "terms": [{"term": "...", "def": "..."}]}`;
 }
@@ -55,14 +80,20 @@ const LEVEL_TEXT = {
 
 /**
  * `count` questions at `level` ("mixed" or one of LEVELS). `avoid` lists the texts of the
- * questions already in the bank, which Claude must not repeat.
+ * questions already in the bank, which Claude must not repeat. `schemas`: about half of the
+ * questions are built on the figures (see LOOK_LINE).
  */
-export function quizPrompt(title, { count = 10, level = "mixed", avoid = [] } = {}) {
+export function quizPrompt(title, { count = 10, level = "mixed", avoid = [], schemas = false } = {}) {
   const mix = LEVELS.includes(level)
     ? `Every question is at the "${level}" level.`
     : "Mix the three levels, roughly a third each.";
   const known = avoid.map(t => `- ${String(t).replace(/\s+/g, " ").trim()}`).join("\n");
-  return `${READ(title)}
+  const figures = schemas ? `
+Figures: about half of the questions (at least ${Math.max(1, Math.round(count / 2))} of the ${count}, when the lecture has enough figures) are built on its figures, diagrams, schemas and tables: what a curve or graph shows (its trend, what changes it, a value read from it), what a labelled part of a diagram is or does, a step or an arrow of a schema, what a table compares or a value it gives, how to read an experiment's result.
+${figureRules("question")}
+- The "why" of such a question says what the figure shows and names it with its page (for example "The pressure-volume loop on page 12 shows …").
+` : "";
+  return `${READ(title, schemas)}
 
 Write ${count} multiple-choice questions that help the student prepare for the exam on this lecture. Test the important ideas, not trivia.
 
@@ -81,7 +112,7 @@ Every question:
 "answer" is the index (0 to 3) of the correct option; vary its position across questions.
 "level" is "recall", "understanding" or "application".
 "why" explains in one or two sentences why the correct option is right. "page" is the page the answer comes from.
-${known ? `
+${figures}${known ? `
 The student already has the questions below. Write new questions about other facts and ideas of the document; do not repeat or reword any of these:
 ${known}
 ` : ""}

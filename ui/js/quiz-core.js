@@ -18,8 +18,6 @@ export const GAPS = [3, 6, 12];
 export const SPARE = 3;
 /** Fewest and most questions asked of Claude for one lecture at a time. */
 export const GEN_MIN = 5, GEN_MAX = 15;
-/** Finished quizzes kept in D.quizLog. */
-export const LOG_KEPT = 20;
 
 export const gapFor = streak => GAPS[Math.min(Math.max(streak || 1, 1), GAPS.length) - 1];
 

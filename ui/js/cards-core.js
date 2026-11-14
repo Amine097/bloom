@@ -7,7 +7,10 @@
 //             seen: n, right: n, lastSeen: "YYYY-MM-DD" | null, lastRight: true | false | null }],
 // }
 // "right" counts the times she graded the card "Knew it"; lastRight is her last grade.
-import { PDF_TOKEN, extractJson, normText, shuffled, withAnswer } from "./notebook-core.js";
+//
+// Every review session with at least one card graded (finished, stopped early or a retry round) is
+// also appended to D.cardLog as { date, lecture, seen: cards graded, knew: graded "Knew it" }.
+import { PDF_TOKEN, LOOK_LINE, extractJson, figureRules, normText, shuffled, withAnswer } from "./notebook-core.js";
 
 /** Most cards kept in one lecture's deck. */
 export const DECK_MAX = 80;
@@ -15,10 +18,11 @@ export const DECK_MAX = 80;
 export const GEN_COUNTS = [10, 20, 30];
 
 // the same opening as the study guide and quiz prompts of notebook-core.js
-const READ = title => `You are helping a university student revise a lecture.
+const READ = (title, schemas = false) => `You are helping a university student revise a lecture.
 Use the Read tool to read the lecture PDF at this path: "${PDF_TOKEN}"
 The lecture is called ${JSON.stringify(String(title || "Untitled"))}.
-Read the whole document. If it is long, read it in parts (at most 20 pages at a time) until you have covered every page.
+Read the whole document. If it is long, read it in parts (at most 20 pages at a time) until you have covered every page.${schemas ? `
+${LOOK_LINE}` : ""}
 
 Rules:
 - Use only what is in this document. Do not add facts from anywhere else.
@@ -26,10 +30,18 @@ Rules:
 - Page numbers are the page numbers of the PDF file: the first page of the file is page 1.
 - Reply with JSON only: no introduction, no comments, no code fences.`;
 
-/** `count` flashcards. `avoid` lists the fronts of the cards already in the deck, which Claude must not repeat. */
-export function cardsPrompt(title, { count = 10, avoid = [] } = {}) {
+/**
+ * `count` flashcards. `avoid` lists the fronts of the cards already in the deck, which Claude must
+ * not repeat. `schemas`: about half of the cards are built on the figures (LOOK_LINE of notebook-core.js).
+ */
+export function cardsPrompt(title, { count = 10, avoid = [], schemas = false } = {}) {
   const known = avoid.map(t => `- ${String(t).replace(/\s+/g, " ").trim()}`).join("\n");
-  return `${READ(title)}
+  const figures = schemas ? `
+Figures: about half of the cards (at least ${Math.max(1, Math.round(count / 2))} of the ${count}, when the lecture has enough figures) are built on its figures, diagrams, schemas and tables: the front asks what a curve or graph shows, what a labelled part of a diagram is or does, what comes next in a schema, or what a table compares; the back answers it.
+${figureRules("card")}
+- The back of such a card ends with the figure and its page in brackets (for example "(pressure-volume loop, p. 12)").
+` : "";
+  return `${READ(title, schemas)}
 
 Write ${count} flashcards that help the student learn this lecture for the exam. Test the important ideas (definitions, mechanisms, key numbers, comparisons, causes and effects), not trivia.
 
@@ -42,7 +54,7 @@ Every card:
 - is different from the other cards: no two cards test the same fact.
 Together, the cards cover the whole lecture, from its first page to its last, not only the beginning.
 "page" is the page the answer comes from.
-${known ? `
+${figures}${known ? `
 The student already has the cards below. Write new cards about other facts and ideas of the document; do not repeat or reword any of these:
 ${known}
 ` : ""}
@@ -140,6 +152,12 @@ export function pickCards(cards, size, rand = Math.random) {
 
 /** A card's history after she grades it: `knew` is true for "Knew it". Returns a new card. */
 export const withGrade = (x, knew, date) => withAnswer(x, knew, date);
+
+/** The D.cardLog entry of a session with `grades` (true = "Knew it"; holes = not graded), or null when none was graded. */
+export function sessionEntry(lecture, grades, date) {
+  const done = grades.filter(g => typeof g === "boolean");
+  return done.length ? { date, lecture, seen: done.length, knew: done.filter(Boolean).length } : null;
+}
 
 /** Where the deck stands: { total, fresh (never seen), known (last grade "Knew it"), notYet }. */
 export function deckStats(cards) {

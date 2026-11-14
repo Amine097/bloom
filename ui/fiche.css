@@ -1,0 +1,269 @@
+/* Bloom fiches: the look of the LaTeX course companions (preamble.tex: Fira Sans, A4, 17 mm margins,
+   tcolorbox boxes in pinks and purples), for the HTML that Claude writes and fiche-render.js lays out
+   in pages. Everything is scoped under .fiche. Sizes are in pt, as in LaTeX (10pt book class).
+   Fira Sans: SIL Open Font License 1.1, fonts/OFL.txt. Pictograms: Font Awesome Free 5.15.4 by
+   @fontawesome, https://fontawesome.com, icons under CC BY 4.0 (https://fontawesome.com/license/free). */
+
+@font-face { font-family: "Fiche Fira Sans"; font-weight: 400; font-style: normal; src: url("fonts/FiraSans-Regular.woff2") format("woff2"); }
+@font-face { font-family: "Fiche Fira Sans"; font-weight: 400; font-style: italic; src: url("fonts/FiraSans-Italic.woff2") format("woff2"); }
+@font-face { font-family: "Fiche Fira Sans"; font-weight: 700; font-style: normal; src: url("fonts/FiraSans-Bold.woff2") format("woff2"); }
+@font-face { font-family: "Fiche Fira Sans"; font-weight: 700; font-style: italic; src: url("fonts/FiraSans-BoldItalic.woff2") format("woff2"); }
+
+.fiche {
+  --ink: #2E2230; --plum: #5B1E4F; --plum-bg: #F5ECF3; --raspberry: #B0225A; --raspberry-bg: #FBE9EF;
+  --fuchsia: #C8177A; --fuchsia-bg: #FDE7F2; --lavender: #5E46A0; --lavender-bg: #EEEAF8;
+  --lilac: #8650B5; --lilac-bg: #F2ECFA; --orchid: #9C2F9A; --orchid-bg: #F8E8F7;
+  --powder: #C04D73; --powder-bg: #FFF0F4; --mauve: #8A6787; --warn: #7A1F5C;
+  --added: #85707D; --added-bg: #F3EFF2; --rule: #D9B8CF;
+  --fa-book: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 448 512'%3E%3Cpath d='M448 360V24c0-13.3-10.7-24-24-24H96C43 0 0 43 0 96v320c0 53 43 96 96 96h328c13.3 0 24-10.7 24-24v-16c0-7.5-3.5-14.3-8.9-18.7-4.2-15.4-4.2-59.3 0-74.7 5.4-4.3 8.9-11.1 8.9-18.6zM128 134c0-3.3 2.7-6 6-6h212c3.3 0 6 2.7 6 6v20c0 3.3-2.7 6-6 6H134c-3.3 0-6-2.7-6-6v-20zm0 64c0-3.3 2.7-6 6-6h212c3.3 0 6 2.7 6 6v20c0 3.3-2.7 6-6 6H134c-3.3 0-6-2.7-6-6v-20zm253.4 250H96c-17.7 0-32-14.3-32-32 0-17.6 14.4-32 32-32h285.4c-1.9 17.1-1.9 46.9 0 64z'/%3E%3C/svg%3E");
+  --fa-cogs: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 640 512'%3E%3Cpath d='M512.1 191l-8.2 14.3c-3 5.3-9.4 7.5-15.1 5.4-11.8-4.4-22.6-10.7-32.1-18.6-4.6-3.8-5.8-10.5-2.8-15.7l8.2-14.3c-6.9-8-12.3-17.3-15.9-27.4h-16.5c-6 0-11.2-4.3-12.2-10.3-2-12-2.1-24.6 0-37.1 1-6 6.2-10.4 12.2-10.4h16.5c3.6-10.1 9-19.4 15.9-27.4l-8.2-14.3c-3-5.2-1.9-11.9 2.8-15.7 9.5-7.9 20.4-14.2 32.1-18.6 5.7-2.1 12.1.1 15.1 5.4l8.2 14.3c10.5-1.9 21.2-1.9 31.7 0L552 6.3c3-5.3 9.4-7.5 15.1-5.4 11.8 4.4 22.6 10.7 32.1 18.6 4.6 3.8 5.8 10.5 2.8 15.7l-8.2 14.3c6.9 8 12.3 17.3 15.9 27.4h16.5c6 0 11.2 4.3 12.2 10.3 2 12 2.1 24.6 0 37.1-1 6-6.2 10.4-12.2 10.4h-16.5c-3.6 10.1-9 19.4-15.9 27.4l8.2 14.3c3 5.2 1.9 11.9-2.8 15.7-9.5 7.9-20.4 14.2-32.1 18.6-5.7 2.1-12.1-.1-15.1-5.4l-8.2-14.3c-10.4 1.9-21.2 1.9-31.7 0zm-10.5-58.8c38.5 29.6 82.4-14.3 52.8-52.8-38.5-29.7-82.4 14.3-52.8 52.8zM386.3 286.1l33.7 16.8c10.1 5.8 14.5 18.1 10.5 29.1-8.9 24.2-26.4 46.4-42.6 65.8-7.4 8.9-20.2 11.1-30.3 5.3l-29.1-16.8c-16 13.7-34.6 24.6-54.9 31.7v33.6c0 11.6-8.3 21.6-19.7 23.6-24.6 4.2-50.4 4.4-75.9 0-11.5-2-20-11.9-20-23.6V418c-20.3-7.2-38.9-18-54.9-31.7L74 403c-10 5.8-22.9 3.6-30.3-5.3-16.2-19.4-33.3-41.6-42.2-65.7-4-10.9.4-23.2 10.5-29.1l33.3-16.8c-3.9-20.9-3.9-42.4 0-63.4L12 205.8c-10.1-5.8-14.6-18.1-10.5-29 8.9-24.2 26-46.4 42.2-65.8 7.4-8.9 20.2-11.1 30.3-5.3l29.1 16.8c16-13.7 34.6-24.6 54.9-31.7V57.1c0-11.5 8.2-21.5 19.6-23.5 24.6-4.2 50.5-4.4 76-.1 11.5 2 20 11.9 20 23.6v33.6c20.3 7.2 38.9 18 54.9 31.7l29.1-16.8c10-5.8 22.9-3.6 30.3 5.3 16.2 19.4 33.2 41.6 42.1 65.8 4 10.9.1 23.2-10 29.1l-33.7 16.8c3.9 21 3.9 42.5 0 63.5zm-117.6 21.1c59.2-77-28.7-164.9-105.7-105.7-59.2 77 28.7 164.9 105.7 105.7zm243.4 182.7l-8.2 14.3c-3 5.3-9.4 7.5-15.1 5.4-11.8-4.4-22.6-10.7-32.1-18.6-4.6-3.8-5.8-10.5-2.8-15.7l8.2-14.3c-6.9-8-12.3-17.3-15.9-27.4h-16.5c-6 0-11.2-4.3-12.2-10.3-2-12-2.1-24.6 0-37.1 1-6 6.2-10.4 12.2-10.4h16.5c3.6-10.1 9-19.4 15.9-27.4l-8.2-14.3c-3-5.2-1.9-11.9 2.8-15.7 9.5-7.9 20.4-14.2 32.1-18.6 5.7-2.1 12.1.1 15.1 5.4l8.2 14.3c10.5-1.9 21.2-1.9 31.7 0l8.2-14.3c3-5.3 9.4-7.5 15.1-5.4 11.8 4.4 22.6 10.7 32.1 18.6 4.6 3.8 5.8 10.5 2.8 15.7l-8.2 14.3c6.9 8 12.3 17.3 15.9 27.4h16.5c6 0 11.2 4.3 12.2 10.3 2 12 2.1 24.6 0 37.1-1 6-6.2 10.4-12.2 10.4h-16.5c-3.6 10.1-9 19.4-15.9 27.4l8.2 14.3c3 5.2 1.9 11.9-2.8 15.7-9.5 7.9-20.4 14.2-32.1 18.6-5.7 2.1-12.1-.1-15.1-5.4l-8.2-14.3c-10.4 1.9-21.2 1.9-31.7 0zM501.6 431c38.5 29.6 82.4-14.3 52.8-52.8-38.5-29.6-82.4 14.3-52.8 52.8z'/%3E%3C/svg%3E");
+  --fa-stethoscope: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath d='M447.1 112c-34.2.5-62.3 28.4-63 62.6-.5 24.3 12.5 45.6 32 56.8V344c0 57.3-50.2 104-112 104-60 0-109.2-44.1-111.9-99.2C265 333.8 320 269.2 320 192V36.6c0-11.4-8.1-21.3-19.3-23.5L237.8.5c-13-2.6-25.6 5.8-28.2 18.8L206.4 35c-2.6 13 5.8 25.6 18.8 28.2l30.7 6.1v121.4c0 52.9-42.2 96.7-95.1 97.2-53.4.5-96.9-42.7-96.9-96V69.4l30.7-6.1c13-2.6 21.4-15.2 18.8-28.2l-3.1-15.7C107.7 6.4 95.1-2 82.1.6L19.3 13C8.1 15.3 0 25.1 0 36.6V192c0 77.3 55.1 142 128.1 156.8C130.7 439.2 208.6 512 304 512c97 0 176-75.4 176-168V231.4c19.1-11.1 32-31.7 32-55.4 0-35.7-29.2-64.5-64.9-64zm.9 80c-8.8 0-16-7.2-16-16s7.2-16 16-16 16 7.2 16 16-7.2 16-16 16z'/%3E%3C/svg%3E");
+  --fa-hashtag: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 448 512'%3E%3Cpath d='M440.667 182.109l7.143-40c1.313-7.355-4.342-14.109-11.813-14.109h-74.81l14.623-81.891C377.123 38.754 371.468 32 363.997 32h-40.632a12 12 0 0 0-11.813 9.891L296.175 128H197.54l14.623-81.891C213.477 38.754 207.822 32 200.35 32h-40.632a12 12 0 0 0-11.813 9.891L132.528 128H53.432a12 12 0 0 0-11.813 9.891l-7.143 40C33.163 185.246 38.818 192 46.289 192h74.81L98.242 320H19.146a12 12 0 0 0-11.813 9.891l-7.143 40C-1.123 377.246 4.532 384 12.003 384h74.81L72.19 465.891C70.877 473.246 76.532 480 84.003 480h40.632a12 12 0 0 0 11.813-9.891L151.826 384h98.634l-14.623 81.891C234.523 473.246 240.178 480 247.65 480h40.632a12 12 0 0 0 11.813-9.891L315.472 384h79.096a12 12 0 0 0 11.813-9.891l7.143-40c1.313-7.355-4.342-14.109-11.813-14.109h-74.81l22.857-128h79.096a12 12 0 0 0 11.813-9.891zM261.889 320h-98.634l22.857-128h98.634l-22.857 128z'/%3E%3C/svg%3E");
+  --fa-flask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 448 512'%3E%3Cpath d='M437.2 403.5L320 215V64h8c13.3 0 24-10.7 24-24V24c0-13.3-10.7-24-24-24H120c-13.3 0-24 10.7-24 24v16c0 13.3 10.7 24 24 24h8v151L10.8 403.5C-18.5 450.6 15.3 512 70.9 512h306.2c55.7 0 89.4-61.5 60.1-108.5zM137.9 320l48.2-77.6c3.7-5.2 5.8-11.6 5.8-18.4V64h64v160c0 6.9 2.2 13.2 5.8 18.4l48.2 77.6h-172z'/%3E%3C/svg%3E");
+  --fa-calculator: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 448 512'%3E%3Cpath d='M400 0H48C22.4 0 0 22.4 0 48v416c0 25.6 22.4 48 48 48h352c25.6 0 48-22.4 48-48V48c0-25.6-22.4-48-48-48zM128 435.2c0 6.4-6.4 12.8-12.8 12.8H76.8c-6.4 0-12.8-6.4-12.8-12.8v-38.4c0-6.4 6.4-12.8 12.8-12.8h38.4c6.4 0 12.8 6.4 12.8 12.8v38.4zm0-128c0 6.4-6.4 12.8-12.8 12.8H76.8c-6.4 0-12.8-6.4-12.8-12.8v-38.4c0-6.4 6.4-12.8 12.8-12.8h38.4c6.4 0 12.8 6.4 12.8 12.8v38.4zm128 128c0 6.4-6.4 12.8-12.8 12.8h-38.4c-6.4 0-12.8-6.4-12.8-12.8v-38.4c0-6.4 6.4-12.8 12.8-12.8h38.4c6.4 0 12.8 6.4 12.8 12.8v38.4zm0-128c0 6.4-6.4 12.8-12.8 12.8h-38.4c-6.4 0-12.8-6.4-12.8-12.8v-38.4c0-6.4 6.4-12.8 12.8-12.8h38.4c6.4 0 12.8 6.4 12.8 12.8v38.4zm128 128c0 6.4-6.4 12.8-12.8 12.8h-38.4c-6.4 0-12.8-6.4-12.8-12.8V268.8c0-6.4 6.4-12.8 12.8-12.8h38.4c6.4 0 12.8 6.4 12.8 12.8v166.4zm0-256c0 6.4-6.4 12.8-12.8 12.8H76.8c-6.4 0-12.8-6.4-12.8-12.8V76.8C64 70.4 70.4 64 76.8 64h294.4c6.4 0 12.8 6.4 12.8 12.8v102.4z'/%3E%3C/svg%3E");
+  --fa-chalkboard-teacher: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 640 512'%3E%3Cpath d='M208 352c-2.39 0-4.78.35-7.06 1.09C187.98 357.3 174.35 360 160 360c-14.35 0-27.98-2.7-40.95-6.91-2.28-.74-4.66-1.09-7.05-1.09C49.94 352-.33 402.48 0 464.62.14 490.88 21.73 512 48 512h224c26.27 0 47.86-21.12 48-47.38.33-62.14-49.94-112.62-112-112.62zm-48-32c53.02 0 96-42.98 96-96s-42.98-96-96-96-96 42.98-96 96 42.98 96 96 96zM592 0H208c-26.47 0-48 22.25-48 49.59V96c23.42 0 45.1 6.78 64 17.8V64h352v288h-64v-64H384v64h-76.24c19.1 16.69 33.12 38.73 39.69 64H592c26.47 0 48-22.25 48-49.59V49.59C640 22.25 618.47 0 592 0z'/%3E%3C/svg%3E");
+  --fa-bullseye: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 496 512'%3E%3Cpath d='M248 8C111.03 8 0 119.03 0 256s111.03 248 248 248 248-111.03 248-248S384.97 8 248 8zm0 432c-101.69 0-184-82.29-184-184 0-101.69 82.29-184 184-184 101.69 0 184 82.29 184 184 0 101.69-82.29 184-184 184zm0-312c-70.69 0-128 57.31-128 128s57.31 128 128 128 128-57.31 128-128-57.31-128-128-128zm0 192c-35.29 0-64-28.71-64-64s28.71-64 64-64 64 28.71 64 64-28.71 64-64 64z'/%3E%3C/svg%3E");
+  --fa-exclamation-triangle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 576 512'%3E%3Cpath d='M569.517 440.013C587.975 472.007 564.806 512 527.94 512H48.054c-36.937 0-59.999-40.055-41.577-71.987L246.423 23.985c18.467-32.009 64.72-31.951 83.154 0l239.94 416.028zM288 354c-25.405 0-46 20.595-46 46s20.595 46 46 46 46-20.595 46-46-20.595-46-46-46zm-43.673-165.346l7.418 136c.347 6.364 5.609 11.346 11.982 11.346h48.546c6.373 0 11.635-4.982 11.982-11.346l7.418-136c.375-6.874-5.098-12.654-11.982-12.654h-63.383c-6.884 0-12.356 5.78-11.981 12.654z'/%3E%3C/svg%3E");
+  --fa-plus-circle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath d='M256 8C119 8 8 119 8 256s111 248 248 248 248-111 248-248S393 8 256 8zm144 276c0 6.6-5.4 12-12 12h-92v92c0 6.6-5.4 12-12 12h-56c-6.6 0-12-5.4-12-12v-92h-92c-6.6 0-12-5.4-12-12v-56c0-6.6 5.4-12 12-12h92v-92c0-6.6 5.4-12 12-12h56c6.6 0 12 5.4 12 12v92h92c6.6 0 12 5.4 12 12v56z'/%3E%3C/svg%3E");
+  --fa-heart: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath d='M462.3 62.6C407.5 15.9 326 24.3 275.7 76.2L256 96.5l-19.7-20.3C186.1 24.3 104.5 15.9 49.7 62.6c-62.8 53.6-66.1 149.8-9.9 207.9l193.5 199.8c12.5 12.9 32.8 12.9 45.3 0l193.5-199.8c56.3-58.1 53-154.3-9.8-207.9z'/%3E%3C/svg%3E");
+  --fa-clipboard-list: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 384 512'%3E%3Cpath d='M336 64h-80c0-35.3-28.7-64-64-64s-64 28.7-64 64H48C21.5 64 0 85.5 0 112v352c0 26.5 21.5 48 48 48h288c26.5 0 48-21.5 48-48V112c0-26.5-21.5-48-48-48zM96 424c-13.3 0-24-10.7-24-24s10.7-24 24-24 24 10.7 24 24-10.7 24-24 24zm0-96c-13.3 0-24-10.7-24-24s10.7-24 24-24 24 10.7 24 24-10.7 24-24 24zm0-96c-13.3 0-24-10.7-24-24s10.7-24 24-24 24 10.7 24 24-10.7 24-24 24zm96-192c13.3 0 24 10.7 24 24s-10.7 24-24 24-24-10.7-24-24 10.7-24 24-24zm128 368c0 4.4-3.6 8-8 8H168c-4.4 0-8-3.6-8-8v-16c0-4.4 3.6-8 8-8h144c4.4 0 8 3.6 8 8v16zm0-96c0 4.4-3.6 8-8 8H168c-4.4 0-8-3.6-8-8v-16c0-4.4 3.6-8 8-8h144c4.4 0 8 3.6 8 8v16zm0-96c0 4.4-3.6 8-8 8H168c-4.4 0-8-3.6-8-8v-16c0-4.4 3.6-8 8-8h144c4.4 0 8 3.6 8 8v16z'/%3E%3C/svg%3E");
+  --fa-star: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 576 512'%3E%3Cpath d='M259.3 17.8L194 150.2 47.9 171.5c-26.2 3.8-36.7 36.1-17.7 54.6l105.7 103-25 145.5c-4.5 26.3 23.2 46 46.4 33.7L288 439.6l130.7 68.7c23.2 12.2 50.9-7.4 46.4-33.7l-25-145.5 105.7-103c19-18.5 8.5-50.8-17.7-54.6L382 150.2 316.7 17.8c-11.7-23.6-45.6-23.9-57.4 0z'/%3E%3C/svg%3E");
+  --fa-link: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath d='M326.612 185.391c59.747 59.809 58.927 155.698.36 214.59-.11.12-.24.25-.36.37l-67.2 67.2c-59.27 59.27-155.699 59.262-214.96 0-59.27-59.26-59.27-155.7 0-214.96l37.106-37.106c9.84-9.84 26.786-3.3 27.294 10.606.648 17.722 3.826 35.527 9.69 52.721 1.986 5.822.567 12.262-3.783 16.612l-13.087 13.087c-28.026 28.026-28.905 73.66-1.155 101.96 28.024 28.579 74.086 28.749 102.325.51l67.2-67.19c28.191-28.191 28.073-73.757 0-101.83-3.701-3.694-7.429-6.564-10.341-8.569a16.037 16.037 0 0 1-6.947-12.606c-.396-10.567 3.348-21.456 11.698-29.806l21.054-21.055c5.521-5.521 14.182-6.199 20.584-1.731a152.482 152.482 0 0 1 20.522 17.197zM467.547 44.449c-59.261-59.262-155.69-59.27-214.96 0l-67.2 67.2c-.12.12-.25.25-.36.37-58.566 58.892-59.387 154.781.36 214.59a152.454 152.454 0 0 0 20.521 17.196c6.402 4.468 15.064 3.789 20.584-1.731l21.054-21.055c8.35-8.35 12.094-19.239 11.698-29.806a16.037 16.037 0 0 0-6.947-12.606c-2.912-2.005-6.64-4.875-10.341-8.569-28.073-28.073-28.191-73.639 0-101.83l67.2-67.19c28.239-28.239 74.3-28.069 102.325.51 27.75 28.3 26.872 73.934-1.155 101.96l-13.087 13.087c-4.35 4.35-5.769 10.79-3.783 16.612 5.864 17.194 9.042 34.999 9.69 52.721.509 13.906 17.454 20.446 27.294 10.606l37.106-37.106c59.271-59.259 59.271-155.699.001-214.959z'/%3E%3C/svg%3E");
+  --fa-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath d='M464 448H48c-26.51 0-48-21.49-48-48V112c0-26.51 21.49-48 48-48h416c26.51 0 48 21.49 48 48v288c0 26.51-21.49 48-48 48zM112 120c-30.928 0-56 25.072-56 56s25.072 56 56 56 56-25.072 56-56-25.072-56-56-56zM64 384h384V272l-87.515-87.515c-4.686-4.686-12.284-4.686-16.971 0L208 320l-55.515-55.515c-4.686-4.686-12.284-4.686-16.971 0L64 336v48z'/%3E%3C/svg%3E");
+  --fa-question-circle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath d='M504 256c0 136.997-111.043 248-248 248S8 392.997 8 256C8 119.083 119.043 8 256 8s248 111.083 248 248zM262.655 90c-54.497 0-89.255 22.957-116.549 63.758-3.536 5.286-2.353 12.415 2.715 16.258l34.699 26.31c5.205 3.947 12.621 3.008 16.665-2.122 17.864-22.658 30.113-35.797 57.303-35.797 20.429 0 45.698 13.148 45.698 32.958 0 14.976-12.363 22.667-32.534 33.976C247.128 238.528 216 254.941 216 296v4c0 6.627 5.373 12 12 12h56c6.627 0 12-5.373 12-12v-1.333c0-28.462 83.186-29.647 83.186-106.667 0-58.002-60.165-102-116.531-102zM256 338c-25.365 0-46 20.635-46 46 0 25.364 20.635 46 46 46s46-20.636 46-46c0-25.365-20.635-46-46-46z'/%3E%3C/svg%3E");
+  --fa-file: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 384 512'%3E%3Cpath d='M224 136V0H24C10.7 0 0 10.7 0 24v464c0 13.3 10.7 24 24 24h336c13.3 0 24-10.7 24-24V160H248c-13.2 0-24-10.8-24-24zm160-14.1v6.1H256V0h6.1c6.4 0 12.5 2.5 17 7l97.9 98c4.5 4.5 7 10.6 7 16.9z'/%3E%3C/svg%3E");
+  --fa-pencil-alt: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath d='M497.9 142.1l-46.1 46.1c-4.7 4.7-12.3 4.7-17 0l-111-111c-4.7-4.7-4.7-12.3 0-17l46.1-46.1c18.7-18.7 49.1-18.7 67.9 0l60.1 60.1c18.8 18.7 18.8 49.1 0 67.9zM284.2 99.8L21.6 362.4.4 483.9c-2.9 16.4 11.4 30.6 27.8 27.8l121.5-21.3 262.6-262.6c4.7-4.7 4.7-12.3 0-17l-111-111c-4.8-4.7-12.4-4.7-17.1 0zM124.1 339.9c-5.5-5.5-5.5-14.3 0-19.8l154-154c5.5-5.5 14.3-5.5 19.8 0s5.5 14.3 0 19.8l-154 154c-5.5 5.5-14.3 5.5-19.8 0zM88 424h48v36.3l-64.5 11.3-31.1-31.1L51.7 376H88v48z'/%3E%3C/svg%3E");
+  font-family: "Fiche Fira Sans", "Fira Sans", sans-serif;
+  font-size: 10pt; line-height: 12pt; color: var(--ink);
+  font-variant-numeric: oldstyle-nums proportional-nums;
+  font-kerning: normal; font-feature-settings: "kern", "liga";
+  letter-spacing: -.011em; word-spacing: -.05em; /* pdfTeX's Fira metrics and interword space are a little tighter */
+  -webkit-font-smoothing: antialiased; text-rendering: geometricPrecision;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+.fiche *, .fiche *::before, .fiche *::after { box-sizing: border-box; }
+
+/* ---- the A4 page */
+.fiche .fc-page { position: relative; width: 210mm; height: 297mm; background: #fff; overflow: hidden; flex: none; }
+.fiche .fc-body { position: absolute; left: 17mm; top: 17mm; width: 176mm; height: 263mm; }
+.fiche .fc-body::after { content: ""; display: block; height: 0; clear: both; }
+.fiche .fc-head { position: absolute; left: 17mm; right: 17mm; top: calc(17mm - 5mm - 14pt); height: 14pt; display: flex; align-items: flex-end; justify-content: space-between; gap: 12pt; font-size: 9pt; line-height: 11pt; color: var(--mauve); border-bottom: .3pt solid var(--ink); padding-bottom: 1.2pt; white-space: nowrap; }
+.fiche .fc-head span { overflow: hidden; text-overflow: ellipsis; }
+.fiche .fc-foot { position: absolute; left: 0; right: 0; top: calc(280mm + 8mm - 8pt); text-align: center; font-size: 9pt; line-height: 11pt; color: var(--raspberry); }
+.fiche .fc-plain .fc-head { display: none; }
+.fiche .fc-roman .fc-foot { font-variant-numeric: normal; }
+
+/* ---- text */
+.fiche p { margin: 3pt 0 0; text-align: justify; hyphens: auto; -webkit-hyphens: auto; }
+.fiche .fc-body > :first-child, .fiche .box > .bt + *, .fiche .box > :first-child { margin-top: 0; }
+.fiche b, .fiche strong { font-weight: 700; }
+.fiche i, .fiche em, .fiche var { font-style: italic; }
+.fiche dfn { font-style: normal; font-weight: 700; color: var(--plum); }
+.fiche span.num { font-weight: 700; color: var(--lavender); }
+.fiche sub, .fiche sup { font-size: 70%; line-height: 0; }
+.fiche p.cont-a, .fiche li.cont-a { text-align-last: justify; }
+.fiche ul, .fiche ol { margin: 2pt 0 0; padding: 0 0 0 1.25em; }
+.fiche li { margin: 1pt 0 0; text-align: justify; hyphens: auto; -webkit-hyphens: auto; }
+.fiche li:first-child { margin-top: 0; }
+.fiche ul > li { list-style: none; position: relative; }
+.fiche ul > li::before { content: "•"; position: absolute; left: -.85em; top: 0; color: var(--ink); }
+.fiche ul > li.cont-b::before { content: none; }
+.fiche ol > li::marker { font-variant-numeric: lining-nums; }
+.fiche ol > li.cont-b { list-style: none; }
+.fiche li > p:first-child { margin-top: 0; }
+.fiche br + br { display: none; }
+
+/* source tags, stars, links */
+.fiche cite { font-style: normal; font-size: 7pt; line-height: 0; color: var(--mauve); white-space: nowrap; margin-left: 1.5pt; }
+.fiche cite::before { content: "["; }
+.fiche cite::after { content: "]"; }
+.fiche cite + cite { margin-left: 0; }
+.fiche [data-goto] { cursor: pointer; }
+.fiche [data-goto]:hover { text-decoration: underline; }
+.fiche .must { display: inline-block; width: 1.1em; height: .95em; vertical-align: -.1em; margin-right: .2em; background: var(--raspberry); -webkit-mask: var(--fa-star) center / contain no-repeat; mask: var(--fa-star) center / contain no-repeat; }
+.fiche .see { font-style: italic; color: var(--mauve); }
+.fiche .see::before { content: ""; display: inline-block; width: 1em; height: .85em; margin-right: .25em; vertical-align: -.05em; background: var(--mauve); -webkit-mask: var(--fa-link) center / contain no-repeat; mask: var(--fa-link) center / contain no-repeat; }
+.fiche .minor { font-size: 9pt; line-height: 11pt; color: var(--mauve); text-align: justify; }
+.fiche .minor > b.fc-label { margin-right: .3em; }
+.fiche .objectives { font-size: 9pt; line-height: 11pt; }
+.fiche .objectives > b.fc-label { color: var(--plum); margin-right: .3em; }
+.fiche .notcovered { font-size: 9pt; line-height: 11pt; color: var(--mauve); }
+.fiche .i-book { --i: var(--fa-book); }
+.fiche .i-cogs { --i: var(--fa-cogs); }
+.fiche .i-stethoscope { --i: var(--fa-stethoscope); }
+.fiche .i-hashtag { --i: var(--fa-hashtag); }
+.fiche .i-flask { --i: var(--fa-flask); }
+.fiche .i-calculator { --i: var(--fa-calculator); }
+.fiche .i-chalkboard-teacher { --i: var(--fa-chalkboard-teacher); }
+.fiche .i-bullseye { --i: var(--fa-bullseye); }
+.fiche .i-exclamation-triangle { --i: var(--fa-exclamation-triangle); }
+.fiche .i-plus-circle { --i: var(--fa-plus-circle); }
+.fiche .i-heart { --i: var(--fa-heart); }
+.fiche .i-clipboard-list { --i: var(--fa-clipboard-list); }
+.fiche .i-star { --i: var(--fa-star); }
+.fiche .i-link { --i: var(--fa-link); }
+.fiche .i-image { --i: var(--fa-image); }
+.fiche .i-question-circle { --i: var(--fa-question-circle); }
+.fiche .i-file { --i: var(--fa-file); }
+.fiche .i-pencil-alt { --i: var(--fa-pencil-alt); }
+.fiche .fc-ic { display: inline-block; width: 1em; height: 1em; vertical-align: -.12em; background: currentColor; -webkit-mask: var(--i) center / contain no-repeat; mask: var(--i) center / contain no-repeat; }
+
+/* ---- headings */
+.fiche h1, .fiche h2, .fiche h3, .fiche h4, .fiche h5 { margin: 0; font-weight: 700; text-align: left; hyphens: manual; -webkit-hyphens: manual; }
+.fiche h1.fc-ch { font-size: 17.28pt; line-height: 22pt; color: var(--plum); margin: 0 0 14pt; padding-top: 7.5pt; padding-left: 0; display: flex; gap: .4em; }
+.fiche h1.fc-ch .n { color: var(--raspberry); flex: none; }
+.fiche h1.fc-ch .bar { color: var(--rule); font-weight: 400; flex: none; margin-left: -.05em; }
+.fiche h1.fc-ch.unnum { margin-top: 4pt; margin-bottom: 14pt; }
+.fiche h2 { font-size: 12pt; line-height: 14pt; color: var(--raspberry); margin: 12pt 0 4pt; display: flex; gap: .6em; }
+.fiche h3 { font-size: 10pt; line-height: 12pt; color: var(--plum); margin: 9pt 0 2pt; display: flex; gap: .5em; }
+.fiche h2 + *, .fiche h3 + * { margin-top: 0; }
+.fiche h2 .n, .fiche h3 .n { flex: none; }
+.fiche h2.fc-star-h { margin-top: 12pt; margin-bottom: 8pt; font-size: 12pt; line-height: 14pt; gap: .3em; align-items: center; }
+.fiche h2.fc-star-h .fc-ic { width: 1em; height: 1em; }
+.fiche .fc-partbanner + h1.fc-ch { padding-top: 0; }
+.fiche .fc-body > .fc-partbanner:first-child { margin-top: 10pt; }
+.fiche .fc-partbanner { background: var(--plum); color: #fff; border-radius: 1mm; padding: 3pt 9pt; font-size: 12pt; line-height: 14pt; font-weight: 700; margin: 0 0 9pt; }
+.fiche .fc-partbanner .dot { margin: 0 .7em; font-weight: 400; }
+
+/* ---- lecture card */
+.fiche .fc-lecture { background: var(--plum-bg); border: .4pt solid var(--rule); border-radius: 1mm; padding: 3.6pt 4pt 2.6pt 7pt; margin: 2pt 0 6pt; font-size: 9pt; line-height: 11pt; }
+.fiche .fc-lecture + .fc-lecture { margin-top: -4pt; }
+.fiche .fc-lecture .l1 { display: flex; gap: 0; align-items: baseline; }
+.fiche .fc-lecture .l1 .fc-ic { color: var(--plum); margin-right: .3em; flex: none; }
+.fiche .fc-lecture .t { font-weight: 700; }
+.fiche .fc-lecture .k { color: var(--mauve); margin-left: 1em; white-space: nowrap; }
+.fiche .fc-lecture .who { margin-left: auto; padding-left: 1em; white-space: nowrap; }
+.fiche .fc-lecture .when { color: var(--mauve); white-space: nowrap; }
+.fiche .fc-lecture .l2 { font-size: 7pt; line-height: 8pt; color: var(--mauve); }
+
+/* ---- boxes (tcolorbox: boxrule .6pt, arc 1.5mm, left/right 5pt, top/bottom 3pt, boxed title 3mm in, 2mm down) */
+.fiche .box { position: relative; border: .6pt solid var(--c); background: var(--bg); border-radius: 1.5mm; padding: 3pt 5pt 3pt; margin: 20pt 0 8pt; text-align: justify; break-inside: auto; }
+.fiche .box > .bt { position: absolute; left: 3mm; top: -11.5pt; max-width: calc(100% - 6mm); background: var(--c); color: #fff; border-radius: 1mm; padding: 2.4pt 7.5pt 2.6pt 7pt; font-size: 9pt; line-height: 11pt; font-weight: 700; text-align: left; }
+.fiche .box > .bt .fc-ic { margin-right: .3em; }
+.fiche .box > .bt cite { color: #fff; font-weight: 700; }
+.fiche .box > .bt .must { background: #fff; }
+.fiche .box > .bt + * { margin-top: 0; }
+.fiche .box.has-t { padding-top: 4.4pt; }
+.fiche .box.cont-a { border-bottom: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; margin-bottom: 0; }
+.fiche .box.cont-b { border-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; margin-top: 0; padding-top: 2pt; }
+.fiche .box.def { --c: var(--plum); --bg: var(--plum-bg); --i: var(--fa-book); }
+.fiche .box.mech { --c: var(--raspberry); --bg: var(--raspberry-bg); --i: var(--fa-cogs); }
+.fiche .box.clin { --c: var(--fuchsia); --bg: var(--fuchsia-bg); --i: var(--fa-stethoscope); }
+.fiche .box.num { --c: var(--lavender); --bg: var(--lavender-bg); --i: var(--fa-hashtag); }
+.fiche .box.meth { --c: var(--lilac); --bg: var(--lilac-bg); --i: var(--fa-flask); }
+.fiche .box.math { --c: var(--orchid); --bg: var(--orchid-bg); --i: var(--fa-calculator); }
+.fiche .box.prof { --c: var(--powder); --bg: var(--powder-bg); --i: var(--fa-chalkboard-teacher); border-left-width: 3pt; }
+.fiche .box.trap { --c: var(--powder); --bg: var(--powder-bg); --i: var(--fa-bullseye); border-left-width: 3pt; }
+.fiche .box.warn { --c: var(--warn); --bg: #fff; --i: var(--fa-exclamation-triangle); border: .6pt dashed var(--warn); }
+.fiche .box.warn.cont-a { border-bottom: 0; }
+.fiche .box.warn.cont-b { border-top: 0; }
+.fiche .box.added { --c: var(--added); --bg: var(--added-bg); --i: var(--fa-plus-circle); border-width: .4pt; }
+.fiche .box.takehome { --c: var(--raspberry); --bg: #fff; --i: var(--fa-heart); border-width: 1pt; }
+.fiche .box.draw { --c: var(--lilac); --bg: #fff; --i: var(--fa-pencil-alt); border-width: 1pt; }
+.fiche .box.summary { --c: var(--plum); --bg: var(--plum-bg); --i: var(--fa-clipboard-list); border-width: 1.2pt; border-radius: 2mm; padding: 5pt 7pt; margin-top: 22pt; }
+.fiche .box.summary > .bt { font-size: 10pt; line-height: 12pt; padding: 3pt 7pt; top: -13.5pt; }
+.fiche .box.summary.has-t { padding-top: 9pt; }
+.fiche .box.summary h5, .fiche .box h5 { font-size: 10pt; line-height: 12pt; color: var(--raspberry); margin: 6pt 0 2pt; }
+.fiche .box ul, .fiche .box ol { margin-top: 1pt; }
+.fiche .box table { margin: 2pt 0; }
+
+/* ---- formulas */
+.fiche .frac { display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center; margin: 0 .15em; line-height: 1.15; }
+.fiche .frac > span:first-child { border-bottom: .5pt solid currentColor; padding: 0 .2em .5pt; }
+.fiche .frac > span:last-child { padding: .5pt .2em 0; }
+.fiche .eq { text-align: center; margin: 4pt 0; }
+.fiche .eq .frac { font-size: 1em; }
+.fiche math { font-family: inherit; }
+
+/* ---- tables (booktabs) */
+.fiche table { width: 100%; border-collapse: collapse; margin: 6pt 0; font-size: inherit; line-height: inherit; text-align: left; }
+.fiche .box table { width: auto; }
+.fiche thead th, .fiche thead td { border-bottom: .5pt solid var(--ink); font-weight: 400; }
+.fiche table { border-top: .8pt solid var(--ink); border-bottom: .8pt solid var(--ink); }
+.fiche .box table { border-top: 0; border-bottom: 0; }
+.fiche th, .fiche td { padding: 1.1pt 6pt; vertical-align: top; text-align: left; hyphens: auto; -webkit-hyphens: auto; }
+.fiche tbody th { font-weight: 700; }
+.fiche th:first-child, .fiche td:first-child { padding-left: 6pt; }
+.fiche table.cont-a { border-bottom: 0; }
+.fiche table.cont-b { border-top: .8pt solid var(--ink); }
+.fiche caption { caption-side: top; font-weight: 700; color: var(--plum); text-align: left; padding: 2pt 6pt; }
+
+/* ---- key figures */
+.fiche .figures .fc-figrow { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; row-gap: 6pt; }
+.fiche .figures .fc-figrow::after { content: ""; flex: auto; }
+.fiche figure { margin: 0; text-align: center; }
+.fiche figure .fc-img { display: block; width: 100%; height: auto; }
+.fiche figure figcaption, .fiche figure .fc-cap { display: block; font-size: 7pt; line-height: 8.5pt; margin-top: 3pt; text-align: center; color: var(--ink); hyphens: auto; -webkit-hyphens: auto; padding: 0 2pt; }
+.fiche figure figcaption cite, .fiche figure .fc-cap cite { font-size: 7pt; }
+.fiche figure svg { display: block; width: 100%; height: auto; font-family: inherit; }
+.fiche figure.drawn svg text { font-family: "Fiche Fira Sans", "Fira Sans", sans-serif; }
+.fiche figure.slide .fc-ph { display: grid; place-items: center; aspect-ratio: 4 / 3; border: .6pt dashed var(--rule); border-radius: 1.5mm; background: var(--plum-bg); color: var(--mauve); font-size: 8pt; line-height: 10pt; padding: 6pt; cursor: pointer; }
+.fiche figure.slide .fc-ph b { display: block; color: var(--plum); font-size: 9pt; }
+.fiche .fc-body > figure, .fiche .fc-body > .box figure { margin: 6pt auto; }
+
+/* ---- self-test MCQs and answers (two columns, small type) */
+.fiche .fc-cols { columns: 2; column-gap: 14pt; column-fill: balance; font-size: 9pt; line-height: 11pt; }
+.fiche .fc-cols.fc-filled { column-fill: auto; }
+.fiche .mcq { break-inside: avoid; padding-top: 3pt; text-align: left; }
+.fiche .mcq p { margin: 0; text-align: justify; }
+.fiche .mcq .qn, .fiche .fc-ans .qn { color: var(--raspberry); font-weight: 700; margin-right: .25em; font-variant-numeric: oldstyle-nums proportional-nums; }
+.fiche .mcq ol { list-style: none; margin: 1pt 0 0; padding-left: 1.6em; }
+.fiche .mcq li { position: relative; margin: 0; text-align: left; }
+.fiche .mcq li .opt { position: absolute; left: -1.6em; font-weight: 700; }
+.fiche .fc-ans { break-inside: avoid; display: grid; grid-template-columns: 4.2em 1fr; padding-top: 2pt; text-align: left; }
+.fiche .fc-ans .qn { color: var(--ink); }
+.fiche .fc-ans .a { font-weight: 700; }
+
+/* ---- title page */
+.fiche .fc-titlepage { background: var(--plum-bg); }
+.fiche .fc-titlepage .fc-body { display: flex; flex-direction: column; }
+.fiche .fc-tp-rule { height: 2pt; background: var(--raspberry); flex: none; }
+.fiche .fc-tp { display: flex; flex-direction: column; height: 100%; }
+.fiche .fc-tp-top { height: calc(2.5cm + 22pt); flex: none; }
+.fiche .fc-tp h1 { font-size: 34pt; line-height: 40pt; color: var(--plum); margin: calc(6mm + 10pt) 0 0; letter-spacing: -.005em; }
+.fiche .fc-tp .subtitle { font-size: 17.28pt; line-height: 22pt; color: var(--raspberry); margin: 3mm 0 0; text-align: left; }
+.fiche .fc-tp .course { font-size: 12pt; line-height: 14pt; margin: calc(6mm + 4pt) 0 0; text-align: left; }
+.fiche .fc-tp .topics { font-size: 12pt; line-height: 14pt; margin: 1.2cm 0 0; }
+.fiche .fc-tp .fill { flex: 1; }
+.fiche .fc-tp .built { color: var(--mauve); margin: 0 0 4mm; }
+.fiche .fc-tp .built cite { font-size: inherit; margin: 0; }
+.fiche .fc-tp .built cite::before { content: "["; }
+
+/* ---- front matter and table of contents */
+.fiche h2.fc-front-h { margin: 14pt 0 10pt; font-size: 12pt; line-height: 14pt; }
+.fiche .fc-code { display: grid; grid-auto-flow: column; grid-template-columns: 1fr 1fr; column-gap: 20pt; row-gap: 0; margin-top: 4pt; align-items: start; }
+.fiche .fc-code .box { margin: 17pt 0 0; font-size: 9pt; line-height: 11pt; }
+
+.fiche .fc-legend { font-size: 9pt; line-height: 11pt; margin-top: 8pt; }
+.fiche .fc-legend .mauvetag { color: var(--mauve); font-weight: 700; }
+.fiche table.fc-index { font-size: 9pt; line-height: 11pt; }
+.fiche table.fc-index td { padding-top: 1pt; padding-bottom: 1pt; }
+.fiche .fc-toc-part { display: flex; font-size: 12pt; line-height: 14pt; font-weight: 700; margin: 18pt 0 10pt; }
+.fiche .fc-toc-part .n { min-width: 4.4em; }
+.fiche .fc-toc-ch { display: flex; font-weight: 700; margin-top: 10pt; }
+.fiche .fc-toc-ch .n:empty { display: none; }
+.fiche .fc-toc-sec .n:empty { min-width: 0; }
+.fiche .fc-toc-ch .n { min-width: 1.5em; }
+.fiche .fc-toc-sec { display: flex; margin-left: 1.5em; margin-top: 2.6pt; }
+.fiche .fc-toc-sec .n { min-width: 2.3em; }
+.fiche .fc-toc-part .t, .fiche .fc-toc-ch .t { flex: 1; }
+.fiche .fc-toc-sec .t { flex: 1; display: flex; overflow: hidden; white-space: nowrap; }
+.fiche .fc-toc-sec .t::after { content: ". . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ."; margin-left: .4em; flex: 1; overflow: hidden; letter-spacing: 2.2pt; color: var(--ink); }
+.fiche .fc-toc-ch .p, .fiche .fc-toc-part .p { min-width: 2.55em; text-align: right; flex: none; }
+.fiche .fc-toc-sec .p { min-width: 2.55em; text-align: right; flex: none; padding-left: 1em; }
+.fiche .fc-toc-ch.first { margin-top: 0; }
+.fiche .fc-toc-ch[data-goto], .fiche .fc-toc-sec[data-goto], .fiche .fc-toc-part[data-goto] { cursor: pointer; }
+
+/* ---- printing: only the pages, one per sheet of A4 */
+@page { size: A4; margin: 0; }
+@media print {
+  html.fiche-printing, html.fiche-printing body { height: auto !important; overflow: visible !important; background: #fff !important; }
+  html.fiche-printing body > :not(#fiche-viewer) { display: none !important; }
+  html.fiche-printing #fiche-viewer { position: static !important; inset: auto !important; padding: 0 !important; background: none !important; backdrop-filter: none !important; display: block !important; }
+  html.fiche-printing #fiche-viewer .fv-bar { display: none !important; }
+  html.fiche-printing #fiche-viewer .fv-scroll { overflow: visible !important; padding: 0 !important; display: block !important; height: auto !important; }
+  html.fiche-printing #fiche-viewer .fv-pages { zoom: 1 !important; transform: none !important; gap: 0 !important; display: block !important; }
+  html.fiche-printing .fiche .fc-page { height: 296.8mm; box-shadow: none !important; margin: 0 !important; break-after: page; page-break-after: always; }
+  html.fiche-printing .fiche .fc-page:last-child { break-after: auto; page-break-after: auto; }
+  html.fiche-printing .fiche .fc-ph { border-style: solid; }
+}
