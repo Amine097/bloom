@@ -2,6 +2,8 @@
 // Purely decorative: it sits under the content, ignores the mouse, and stands still when the
 // Mac is set to reduce motion. Everything is drawn here, so there are no image files to ship.
 
+import { mountBlossom } from "./scene-blossom.js";
+
 const rand = (a, b) => a + Math.random() * (b - a);
 
 /** Meadow flowers: fixed positions so the picture does not change between launches. */
@@ -76,10 +78,39 @@ function pathKeyframes(i) {
   return `@keyframes bf-path-${i}{${steps.join("")}}`;
 }
 
-export function mountScene(count = 7) {
-  const scene = document.getElementById("scene");
+/** The meadow, drawn into one layer of #scene; returns what undoes it. */
+function mountMeadow(layer, count = 7) {
   const style = document.createElement("style");
   style.textContent = Array.from({ length: count }, (_, i) => pathKeyframes(i)).join("");
   document.head.append(style);
-  scene.innerHTML = LAND + Array.from({ length: count }, (_, i) => butterfly(i)).join("");
+  layer.innerHTML = LAND + Array.from({ length: count }, (_, i) => butterfly(i)).join("");
+  return () => style.remove();
+}
+
+const SCENES = { nature: mountMeadow, blossom: mountBlossom };
+let shown = null; // { bg, layer, undo }
+
+/** Show the backdrop for `bg` ("nature", "blossom" or "plain"). Switching needs no reload: the
+ *  old scene fades out and is removed with its styles, the new one fades in. Calling it again
+ *  with the scene already shown does nothing, so it is safe on every refresh. */
+export function mountScene(bg = document.documentElement.dataset.bg) {
+  if (!SCENES[bg]) bg = "plain";
+  if (shown?.bg === bg) return;
+  const scene = document.getElementById("scene");
+  const old = shown;
+  shown = { bg, layer: null, undo: null };
+  if (old) {
+    const drop = () => { old.layer?.remove(); old.undo?.(); };
+    if (old.layer && bg !== "plain") {
+      old.layer.classList.add("leaving");
+      setTimeout(drop, 1800);
+    } else drop();
+  }
+  if (bg === "plain") return;
+  const layer = document.createElement("div");
+  layer.className = "scene-layer" + (old && old.bg !== "plain" ? " entering" : "");
+  shown.layer = layer;
+  shown.undo = SCENES[bg](layer);
+  scene.append(layer);
+  if (layer.classList.contains("entering")) requestAnimationFrame(() => requestAnimationFrame(() => layer.classList.remove("entering")));
 }

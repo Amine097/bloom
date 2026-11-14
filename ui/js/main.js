@@ -10,6 +10,7 @@ import * as settings from "./views/settings.js";
 import * as notebook from "./views/notebook.js";
 import * as planner from "./views/planner.js";
 import { mountScene } from "./scene.js";
+import { backgroundAt, msToNextBlock } from "./background.js";
 
 const VIEWS = {
   dashboard: { label: "Dashboard", icon: "home", mod: dashboard },
@@ -34,7 +35,18 @@ function applyTheme() {
   const t = D.settings.theme;
   const dark = t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.dataset.theme = dark ? "dark" : "light";
-  document.documentElement.dataset.bg = D.settings.background === "plain" ? "plain" : "nature";
+  applyBackground();
+}
+
+/** Show the backdrop the setting asks for now; with "Change every 2 hours", also set a timer for
+ *  the next two-hour boundary, so the scene changes by itself while Bloom stays open. */
+let bgTimer = 0;
+function applyBackground() {
+  const bg = backgroundAt(D.settings.background, new Date());
+  document.documentElement.dataset.bg = bg;
+  mountScene(bg);
+  clearTimeout(bgTimer);
+  if (D.settings.background === "alternate") bgTimer = setTimeout(applyBackground, msToNextBlock(new Date()) + 500);
 }
 
 function renderNav() {
@@ -112,6 +124,8 @@ function bindEvents() {
   const rollover = () => { if (today() !== shownDay) { shownDay = today(); refresh(); planner.onStart(); } };
   setInterval(rollover, 60_000);
   document.addEventListener("visibilitychange", rollover);
+  // timers can sleep with the Mac: recheck the two-hourly backdrop when the window comes back
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) applyBackground(); });
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
 }
 
@@ -182,7 +196,6 @@ async function start() {
   onSaveError(e => toast("Could not save: " + (e?.message || e), "error"));
   bindEvents();
   todo.bindDrag($("#main"));
-  mountScene();
   if (inApp) {
     try { app.version = await window.__TAURI__.app.getVersion(); } catch { /* shown as blank */ }
   }

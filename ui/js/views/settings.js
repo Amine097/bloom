@@ -4,6 +4,7 @@ import { fmtWday, relDay, parse } from "../dates.js";
 import { esc, icon, app, openModal, confirmBox, field, input, cvar, toast, COLORS } from "../ui.js";
 import { assistantStatus, setup } from "../assistant.js";
 import { NAMES } from "../assistant-core.js";
+import { BACKGROUNDS } from "../background.js";
 
 // ---- the Assistant cards: Claude, and Codex as its backup; installing and signing in, without Terminal
 
@@ -243,7 +244,7 @@ export function render() {
           <div class="card-b">
             ${field("Your name", input("name", s.name, 'data-change="setText" placeholder="Shown on the dashboard"'))}
             ${field("Appearance", `<select data-change="setText" name="theme">${[["auto", "Follow the Mac"], ["light", "Light"], ["dark", "Dark"]].map(([v, l]) => `<option value="${v}" ${s.theme === v ? "selected" : ""}>${l}</option>`).join("")}</select>`)}
-            ${field("Background", `<select data-change="setText" name="background">${[["nature", "Meadow with butterflies"], ["plain", "Plain"]].map(([v, l]) => `<option value="${v}" ${s.background === v ? "selected" : ""}>${l}</option>`).join("")}</select>`)}
+            ${field("Background", `<select data-change="setText" name="background">${BACKGROUNDS.map(([v, l]) => `<option value="${v}" ${s.background === v ? "selected" : ""}>${l}</option>`).join("")}</select>`)}
           </div>
         </section>
         <section class="card"><div class="card-h"><h3>Semester and recalls</h3></div>
