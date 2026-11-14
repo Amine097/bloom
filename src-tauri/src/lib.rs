@@ -114,6 +114,7 @@ fn save_pdf(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), Stri
         return Err("not a PDF".into());
     }
     let file = pdf_path(&app, id)?;
+    let _ = fs::remove_file(file.with_extension("txt")); // its old text, see pdf_text
     let tmp = file.with_extension("tmp");
     fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
     fs::rename(&tmp, &file).map_err(|e| e.to_string())
@@ -128,16 +129,81 @@ fn read_pdf(app: AppHandle, id: String) -> Result<tauri::ipc::Response, String> 
 #[tauri::command]
 fn delete_pdf(app: AppHandle, id: String) -> Result<(), String> {
     let file = pdf_path(&app, &id)?;
+    let _ = fs::remove_file(file.with_extension("txt")); // its text, see pdf_text
     if file.exists() {
         fs::remove_file(&file).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
+/// Extracts a PDF's text, page by page, with macOS's own PDFKit (no install, no permission), and
+/// writes it as UTF-8 to the file `argv[1]`. "--- Page n ---" starts page n, n being the PDF's own
+/// page numbers. The path comes as an argument, never inside the script.
+const PDF_TEXT_SCRIPT: &str = r#"ObjC.import('Foundation');
+try { ObjC.import('PDFKit'); } catch (e) { ObjC.import('Quartz'); }
+function run(argv) {
+  const doc = $.PDFDocument.alloc.initWithURL($.NSURL.fileURLWithPath(argv[0]));
+  if (!doc || doc.isNil()) return 'none';
+  const count = doc.pageCount;
+  let out = '';
+  for (let i = 0; i < count; i++) {
+    let text = '';
+    try {
+      const page = doc.pageAtIndex(i);
+      const s = page && !page.isNil() ? page.string : null;
+      if (s && !s.isNil()) text = s.js;
+    } catch (e) { text = ''; }
+    out += '\n--- Page ' + (i + 1) + ' ---\n' + text;
+  }
+  const ok = $(out).writeToFileAtomicallyEncodingError(argv[1], true, $.NSUTF8StringEncoding, null);
+  return ok ? 'ok' : 'none';
+}"#;
+const PDF_TEXT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The text of the lecture PDF `id`, page by page (see PDF_TEXT_SCRIPT), so the Notebook can put
+/// it in the prompt instead of having the assistant read the PDF. Kept beside the PDF as
+/// `pdfs/<id>.txt` once extracted. Any failure gives "": the prompt is then left as it was.
+#[tauri::command]
+async fn pdf_text(app: AppHandle, id: String) -> Result<String, String> {
+    let file = pdf_path(&app, &id)?;
+    tauri::async_runtime::spawn_blocking(move || extract_pdf_text(&file))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+fn extract_pdf_text(file: &Path) -> String {
+    if !file.is_file() {
+        return String::new();
+    }
+    let cache = file.with_extension("txt");
+    if let Ok(text) = fs::read_to_string(&cache) {
+        if text.contains("--- Page ") {
+            return text;
+        }
+    }
+    let mut cmd = Command::new("/usr/bin/osascript");
+    cmd.args(["-l", "JavaScript", "-e", PDF_TEXT_SCRIPT])
+        .arg(file)
+        .arg(&cache);
+    match run_with_timeout(cmd, b"", PDF_TEXT_TIMEOUT) {
+        Ok(Some((status, _, _))) if status.success() => match fs::read_to_string(&cache) {
+            Ok(text) if text.contains("--- Page ") => text,
+            _ => {
+                let _ = fs::remove_file(&cache);
+                String::new()
+            }
+        },
+        _ => {
+            let _ = fs::remove_file(&cache);
+            String::new()
+        }
+    }
+}
+
 // ---- the Notebook: asking Claude Code about a lecture PDF
 
 /// Same flags as CLAUDE_ARGS in ui/js/notebook-core.js (used by the browser preview).
-const CLAUDE_ARGS: [&str; 9] = [
+const CLAUDE_ARGS: [&str; 11] = [
     "-p",
     "--output-format",
     "json",
@@ -147,6 +213,8 @@ const CLAUDE_ARGS: [&str; 9] = [
     "Read",
     "--max-turns",
     "8",
+    "--effort", // the answers are as good, and much faster
+    "low",
 ];
 const CLAUDE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
@@ -359,15 +427,38 @@ const KEYNOTE_EXPORT: &str = r#"on run argv
 	end tell
 end run"#;
 
+/// Asks Launch Services (macOS's own list of installed apps) where Keynote is, by the bundle id the
+/// export script uses. No app is opened and no permission is needed. Prints the path, or nothing.
+const KEYNOTE_LOOKUP: &str = "ObjC.import('AppKit'); \
+    const u = $.NSWorkspace.sharedWorkspace.URLForApplicationWithBundleIdentifier('com.apple.iWork.Keynote'); \
+    u.isNil() ? '' : u.path.js";
+
 /// Whether Keynote is installed. Checked first: a script naming a missing app would make macOS
-/// ask her where it is.
+/// ask her where it is. Launch Services finds it wherever and however it was installed; the usual
+/// folders (any app with "Keynote" in its name) and Spotlight are asked too.
 fn keynote_installed() -> bool {
-    let mut places = vec![PathBuf::from("/Applications/Keynote.app")];
-    if let Some(home) = std::env::var_os("HOME") {
-        places.push(PathBuf::from(home).join("Applications/Keynote.app"));
-    }
-    if places.iter().any(|p| p.is_dir()) {
+    let found = Command::new("/usr/bin/osascript")
+        .args(["-l", "JavaScript", "-e", KEYNOTE_LOOKUP])
+        .output()
+        .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
+        .unwrap_or(false);
+    if found {
         return true;
+    }
+    let mut dirs = vec![PathBuf::from("/Applications")];
+    if let Some(home) = std::env::var_os("HOME") {
+        dirs.push(PathBuf::from(home).join("Applications"));
+    }
+    for dir in &dirs {
+        let Ok(entries) = fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            if name.contains("keynote") && name.ends_with(".app") {
+                return true;
+            }
+        }
     }
     Command::new("/usr/bin/mdfind")
         .arg("kMDItemCFBundleIdentifier == 'com.apple.iWork.Keynote'")
@@ -404,6 +495,9 @@ fn keynote_to_pdf(dir: &Path, ext: &str, bytes: &[u8]) -> Result<Vec<u8>, String
                 return Ok(pdf);
             }
             let detail = tail_text(&err, 200);
+            if detail.contains("-10814") || detail.contains("-2741") {
+                return Err("Keynote could not be found on this Mac. If it is installed, open it once, then try again; or save the slides as a PDF from PowerPoint.".into());
+            }
             if detail.contains("-1743") {
                 return Err("Bloom is not allowed to use Keynote. Allow it in System Settings → Privacy & Security → Automation → Bloom, then try again.".into());
             }
@@ -946,6 +1040,7 @@ pub fn run() {
             save_pdf,
             read_pdf,
             delete_pdf,
+            pdf_text,
             convert_to_pdf,
             ask_claude,
             claude_status,

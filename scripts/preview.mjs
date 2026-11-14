@@ -1,7 +1,8 @@
 // Serves ui/ on http://localhost:4173 so the interface can be developed in a normal browser.
 // It also answers POST /api/ask?via=claude|codex, which runs the local Claude Code or Codex CLI (on a
 // lecture PDF or none), the way the native shell does in the app (see ask_claude and ask_codex in
-// src-tauri/src/lib.rs), and GET /api/claude-status and /api/codex-status.
+// src-tauri/src/lib.rs), GET /api/claude-status and /api/codex-status, and POST /api/pdf-text (the
+// text of a lecture PDF, like pdf_text in lib.rs).
 import { createServer } from "node:http";
 import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
@@ -144,6 +145,59 @@ async function ask(req, res) {
   }
 }
 
+// ---- POST /api/pdf-text: a PDF in, its text out, page by page ("--- Page n ---" starts page n), as
+// pdf_text in the native shell gives it. With pdftotext when it is installed, else Python's pypdf
+// (BLOOM_PYTHON, default python3). Neither: 501, and the Notebook then lets the assistant read the PDF.
+
+const PYPDF_TEXT = `import json, sys
+from pypdf import PdfReader
+pages = []
+for page in PdfReader(sys.argv[1]).pages:
+    try:
+        pages.append(page.extract_text() or "")
+    except Exception:
+        pages.append("")
+print(json.dumps(pages))`;
+
+const asPages = pages => pages.map((t, i) => `\n--- Page ${i + 1} ---\n${t}`).join("");
+
+async function extractText(file) {
+  const a = await runTool("pdftotext", ["-layout", "-enc", "UTF-8", file, "-"], 60_000);
+  if (!a.missing && !a.timedOut && a.code === 0 && a.out.trim()) {
+    // pdftotext ends every page with a form feed
+    const pages = a.out.split("\f");
+    if (pages.length > 1 && !pages.at(-1).trim()) pages.pop();
+    return asPages(pages);
+  }
+  const b = await runTool(process.env.BLOOM_PYTHON || "python3", ["-I", "-c", PYPDF_TEXT, file], 60_000);
+  if (!b.missing && !b.timedOut && b.code === 0) {
+    try {
+      const pages = JSON.parse(b.out);
+      if (Array.isArray(pages)) return asPages(pages.map(String));
+    } catch { /* not what was expected */ }
+  }
+  return null;
+}
+
+async function pdfText(req, res) {
+  if (!allowed(req)) return sendJson(res, 403, { error: "Forbidden" });
+  let dir;
+  try {
+    const pdf = await readBody(req);
+    if (!pdf.subarray(0, 1024).includes("%PDF-")) return sendJson(res, 400, { error: "That file is not a PDF." });
+    dir = await mkdtemp(join(tmpdir(), "bloom-text-"));
+    const file = join(dir, "lecture.pdf");
+    await writeFile(file, pdf);
+    const text = await extractText(file);
+    if (text === null) return sendJson(res, 501, { error: "No tool to extract a PDF's text was found on this computer." });
+    sendJson(res, 200, { text });
+  } catch (e) {
+    sendJson(res, 500, { error: e.message || String(e) });
+  } finally {
+    if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 // ---- POST /api/convert?ext=ppt|pptx|key: slides in, PDF out (convert_to_pdf in the native shell
 // does this with Keynote). Here: Keynote on a Mac, PowerPoint on Windows (and from WSL), else LibreOffice.
 
@@ -222,6 +276,10 @@ createServer(async (req, res) => {
   catch { res.writeHead(400).end("Bad request"); return; } // a malformed URL must not stop the server
   if (path === "/api/ask") {
     if (req.method === "POST") return ask(req, res);
+    res.writeHead(405).end(); return;
+  }
+  if (path === "/api/pdf-text") {
+    if (req.method === "POST") return pdfText(req, res);
     res.writeHead(405).end(); return;
   }
   if (path === "/api/convert") {

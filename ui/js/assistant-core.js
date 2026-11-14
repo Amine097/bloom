@@ -1,6 +1,8 @@
 // Which assistant answers (Claude Code or Codex), and reading what the Codex CLI prints.
 // Pure, covered by tests/assistant.test.mjs. The app and the preview server both use it.
 
+import { INLINED, MAY_READ } from "./pdftext-core.js";
+
 export const NAMES = { claude: "Claude", codex: "Codex" };
 
 /**
@@ -25,13 +27,19 @@ export const isReady = s => Boolean(s?.installed && s?.loggedIn);
 
 /**
  * The prompts are written for Claude. For Codex: it has no Read tool, so it is told how to read a
- * PDF with the tools it has, and to say so instead of guessing when it cannot.
+ * PDF with the tools it has, and to say so instead of guessing when it cannot. When the PDF's text
+ * is already in the prompt (inlinePdfText() of pdftext-core.js), it only opens the PDF for a page
+ * whose text is missing or a figure that matters.
  */
 export function adaptPrompt(prompt, who, withPdf) {
   const text = String(prompt ?? "");
   if (who !== "codex") return text;
-  const plain = text.replace(/Use the Read tool to read/g, "Read");
+  const plain = text.replace(/Use the Read tool to read/g, "Read")
+    .split(MAY_READ).join("you may look at that page of the PDF file");
   if (!withPdf) return plain;
+  if (plain.includes(INLINED)) return `${plain}
+
+The text of the PDF is already given above: work from it. Only when a page's text is missing or a figure matters, look at that page of the PDF file with a command-line tool (for example pdftotext -f n -l n, a short Python script, or on macOS osascript -l JavaScript with PDFKit). Only read files: never create, change or delete any.`;
   return `${plain}
 
 How to read the PDF: it is a PDF file, so extract its text with a command-line tool (for example pdftotext, a short Python script, or on macOS osascript -l JavaScript with PDFKit), page by page so that the page numbers stay right. Only read files: never create, change or delete any.

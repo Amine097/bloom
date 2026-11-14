@@ -2,7 +2,7 @@
 // parsers that turn its answers into study guides and quizzes. Pure, covered by tests/.
 
 /** The command line, shared by the dev preview server. The native shell (lib.rs) uses the same flags. */
-export const CLAUDE_ARGS = ["-p", "--output-format", "json", "--no-session-persistence", "--strict-mcp-config", "--allowedTools", "Read", "--max-turns", "8"];
+export const CLAUDE_ARGS = ["-p", "--output-format", "json", "--no-session-persistence", "--strict-mcp-config", "--allowedTools", "Read", "--max-turns", "8", "--effort", "low"];
 
 /** Where the caller puts the absolute path of the PDF. */
 export const PDF_TOKEN = "{{PDF}}";

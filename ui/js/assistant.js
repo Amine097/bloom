@@ -8,6 +8,7 @@ import { toast } from "./ui.js";
 import {
   NAMES, adaptPrompt, checkAnswer, isUsageLimit, limitResetsAt, mergeStatus, runnerFor, isReady, fakeStatus,
 } from "./assistant-core.js";
+import { inlinePdfText } from "./pdftext-core.js";
 
 const tauri = window.__TAURI__;
 
@@ -60,6 +61,38 @@ async function runOn(who, pdfId, prompt) {
   return reply.result;
 }
 
+/** The text of each PDF already extracted, by id (see pdfText()). Not saved; a few at most. */
+const texts = new Map();
+const TEXTS_KEPT = 12;
+
+/**
+ * The text of the PDF `pdfId`, page by page ("--- Page n ---" starts page n), extracted by the
+ * native shell (pdf_text) or the preview server (/api/pdf-text). "" when it cannot be had: the
+ * prompt is then sent as it is and the assistant reads the PDF itself. Never throws.
+ */
+async function pdfText(pdfId) {
+  if (texts.has(pdfId)) return texts.get(pdfId);
+  let text = "";
+  try {
+    if (tauri) text = await tauri.core.invoke("pdf_text", { id: pdfId });
+    else {
+      const res = await fetch("/api/pdf-text", {
+        method: "POST",
+        headers: { "Content-Type": "application/pdf", "X-Bloom-Ask": "1" },
+        body: await pdfBlob(pdfId),
+      });
+      if (res.ok) text = (await res.json()).text;
+      else if (res.status !== 501) return ""; // worth trying again next time
+    }
+  } catch {
+    return "";
+  }
+  text = typeof text === "string" ? text : "";
+  texts.set(pdfId, text);
+  if (texts.size > TEXTS_KEPT) texts.delete(texts.keys().next().value);
+  return text;
+}
+
 /** The last status if it is recent, else a new one; null when it cannot be checked. */
 async function statusForRun() {
   if (last && Date.now() - lastAt < FRESH_MS) return mergeStatus(last.claude, last.codex, limitedUntil);
@@ -70,6 +103,8 @@ async function ask(pdfId, prompt) {
   const status = await statusForRun();
   const who = runnerFor(status);
   if (!who) throw failure("no-claude");
+  // the PDF's text goes in the prompt, so the assistant need not read the PDF first
+  if (pdfId) prompt = inlinePdfText(prompt, await pdfText(pdfId));
   const run = name => runOn(name, pdfId, adaptPrompt(prompt, name, Boolean(pdfId))).then(text => checkAnswer(text, name));
   try {
     return await run(who);
@@ -85,7 +120,8 @@ async function ask(pdfId, prompt) {
 
 /**
  * Sends `prompt` to the assistant with the PDF readable by it, and returns its final text.
- * The prompt holds the token {{PDF}}, which is replaced by the absolute path of the PDF.
+ * The prompt holds the token {{PDF}}, which is replaced by the absolute path of the PDF. Its
+ * instruction to read the PDF is replaced by the PDF's text when it can be extracted (pdftext-core.js).
  * Throws an Error she can read; `error.code` is "no-claude" when no assistant is installed.
  */
 export const askAboutPdf = (pdfId, prompt) => ask(pdfId, prompt);
