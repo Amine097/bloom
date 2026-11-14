@@ -584,7 +584,7 @@ fn run_export(name: &str, script: &Path, input: &Path, output: &Path) -> Result<
 }
 
 /// The PDF at `path` when the export ran fine and wrote one.
-fn read_pdf(ok: bool, path: &Path) -> Option<Vec<u8>> {
+fn exported_pdf(ok: bool, path: &Path) -> Option<Vec<u8>> {
     let pdf = fs::read(path).unwrap_or_default();
     if ok && is_pdf(&pdf) {
         Some(pdf)
@@ -641,7 +641,7 @@ fn export_with(
         ok = again.0;
         detail = again.1;
     }
-    if let Some(pdf) = read_pdf(ok, &output) {
+    if let Some(pdf) = exported_pdf(ok, &output) {
         return Ok(Ok(pdf));
     }
     // it could open the slides but perhaps not write into Bloom's folder: its own folder then
@@ -649,7 +649,7 @@ fn export_with(
         let stamp = dir.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         if let Some(own) = container_file(id, &format!("bloom-{stamp}.pdf")) {
             let (ok2, detail2) = run_export(name, &script, input, &own)?;
-            let pdf = read_pdf(ok2, &own);
+            let pdf = exported_pdf(ok2, &own);
             let _ = fs::remove_file(&own);
             if let Some(pdf) = pdf {
                 return Ok(Ok(pdf));
