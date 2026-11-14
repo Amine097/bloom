@@ -407,13 +407,14 @@ fn read_envelope(status: ExitStatus, out: &[u8], err: &[u8]) -> Result<String, S
 const SLIDE_TYPES: [&str; 3] = ["ppt", "pptx", "key"];
 const CONVERT_TIMEOUT: Duration = Duration::from_secs(4 * 60);
 
-/// Opens the slides in Keynote and exports them as a PDF. The two paths are arguments, never
-/// part of the script. Keynote is quit afterwards only if it was not open before.
+/// Opens the slides in Keynote and exports them as a PDF. `{ID}` is Keynote's bundle id as read
+/// from the app itself (see find_keynote). The two paths are arguments, never part of the script.
+/// Keynote is quit afterwards only if it was not open before.
 const KEYNOTE_EXPORT: &str = r#"on run argv
 	set inFile to POSIX file (item 1 of argv)
 	set outFile to POSIX file (item 2 of argv)
-	set wasRunning to application id "com.apple.iWork.Keynote" is running
-	tell application id "com.apple.iWork.Keynote"
+	set wasRunning to application id "{ID}" is running
+	tell application id "{ID}"
 		set doc to open inFile
 		try
 			export doc to outFile as PDF
@@ -427,23 +428,44 @@ const KEYNOTE_EXPORT: &str = r#"on run argv
 	end tell
 end run"#;
 
-/// Asks Launch Services (macOS's own list of installed apps) where Keynote is, by the bundle id the
-/// export script uses. No app is opened and no permission is needed. Prints the path, or nothing.
+/// Asks Launch Services (macOS's own list of installed apps) where Keynote is: by its usual bundle
+/// id, then by its name. No app is opened and no permission is needed. Prints the path, or nothing.
 const KEYNOTE_LOOKUP: &str = "ObjC.import('AppKit'); \
-    const u = $.NSWorkspace.sharedWorkspace.URLForApplicationWithBundleIdentifier('com.apple.iWork.Keynote'); \
-    u.isNil() ? '' : u.path.js";
+    const w = $.NSWorkspace.sharedWorkspace; \
+    const u = w.URLForApplicationWithBundleIdentifier('com.apple.iWork.Keynote'); \
+    const p = u.isNil() ? w.fullPathForApplication('Keynote') : u.path; \
+    p.isNil() ? '' : p.js";
 
-/// Whether Keynote is installed. Checked first: a script naming a missing app would make macOS
-/// ask her where it is. Launch Services finds it wherever and however it was installed; the usual
-/// folders (any app with "Keynote" in its name) and Spotlight are asked too.
-fn keynote_installed() -> bool {
-    let found = Command::new("/usr/bin/osascript")
-        .args(["-l", "JavaScript", "-e", KEYNOTE_LOOKUP])
+const LSREGISTER: &str =
+    "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+
+/// The bundle id an app declares in its Info.plist, when it is a plain id.
+fn bundle_id(app: &Path) -> Option<String> {
+    let out = Command::new("/usr/bin/defaults")
+        .arg("read")
+        .arg(app.join("Contents/Info"))
+        .arg("CFBundleIdentifier")
         .output()
-        .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
-        .unwrap_or(false);
-    if found {
-        return true;
+        .ok()?;
+    let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let plain = !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+    if out.status.success() && plain {
+        Some(id)
+    } else {
+        None
+    }
+}
+
+/// Where Keynote is and the bundle id it really has. Its id is read from the app rather than
+/// assumed, since versions differ. Launch Services first, then the usual folders (any app with
+/// "Keynote" in its name), then Spotlight.
+fn find_keynote() -> Option<(PathBuf, String)> {
+    let mut places: Vec<PathBuf> = Vec::new();
+    if let Ok(out) = Command::new("/usr/bin/osascript").args(["-l", "JavaScript", "-e", KEYNOTE_LOOKUP]).output() {
+        let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !path.is_empty() {
+            places.push(PathBuf::from(path));
+        }
     }
     let mut dirs = vec![PathBuf::from("/Applications")];
     if let Some(home) = std::env::var_os("HOME") {
@@ -456,26 +478,46 @@ fn keynote_installed() -> bool {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_lowercase();
             if name.contains("keynote") && name.ends_with(".app") {
-                return true;
+                places.push(entry.path());
             }
         }
     }
-    Command::new("/usr/bin/mdfind")
-        .arg("kMDItemCFBundleIdentifier == 'com.apple.iWork.Keynote'")
+    if let Ok(out) = Command::new("/usr/bin/mdfind")
+        .arg("kMDItemContentType == 'com.apple.application-bundle' && kMDItemFSName == '*Keynote*.app'c")
         .output()
-        .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
-        .unwrap_or(false)
+    {
+        for line in String::from_utf8_lossy(&out.stdout).lines() {
+            if !line.trim().is_empty() {
+                places.push(PathBuf::from(line.trim()));
+            }
+        }
+    }
+    places
+        .into_iter()
+        .filter(|p| p.is_dir())
+        .find_map(|p| bundle_id(&p).map(|id| (p, id)))
 }
 
 fn is_pdf(bytes: &[u8]) -> bool {
     bytes[..bytes.len().min(1024)].windows(5).any(|w| w == b"%PDF-")
 }
 
+/// Runs the export script. → (it ran fine, the last lines it printed on stderr)
+fn run_keynote_export(script: &Path, input: &Path, output: &Path) -> Result<(bool, String), String> {
+    let mut cmd = Command::new("/usr/bin/osascript");
+    cmd.arg(script).arg(input).arg(output);
+    match run_with_timeout(cmd, b"", CONVERT_TIMEOUT) {
+        Err(e) => Err(format!("Could not start Keynote: {e}")),
+        Ok(None) => Err("Keynote took longer than 4 minutes and was stopped. Save the slides as a PDF from PowerPoint instead.".into()),
+        Ok(Some((status, _out, err))) => Ok((status.success(), tail_text(&err, 200))),
+    }
+}
+
 /// Converts the slides in `dir` (a fresh folder, removed by the caller) and returns the PDF.
 fn keynote_to_pdf(dir: &Path, ext: &str, bytes: &[u8]) -> Result<Vec<u8>, String> {
-    if !keynote_installed() {
+    let Some((app, id)) = find_keynote() else {
         return Err("Bloom uses Keynote to turn slides into a PDF, and Keynote is not on this Mac. Install it (free, from the App Store), or save the slides as a PDF from PowerPoint.".into());
-    }
+    };
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let input = dir.join(format!("slides.{ext}"));
     let output = dir.join("slides.pdf");
@@ -483,30 +525,31 @@ fn keynote_to_pdf(dir: &Path, ext: &str, bytes: &[u8]) -> Result<Vec<u8>, String
     // an existing target file is easier for Keynote (a sandboxed app) to write to
     fs::write(&output, b"").map_err(|e| e.to_string())?;
     let script = dir.join("export.applescript");
-    fs::write(&script, KEYNOTE_EXPORT).map_err(|e| e.to_string())?;
-    let mut cmd = Command::new("/usr/bin/osascript");
-    cmd.arg(&script).arg(&input).arg(&output);
-    match run_with_timeout(cmd, b"", CONVERT_TIMEOUT) {
-        Err(e) => Err(format!("Could not start Keynote: {e}")),
-        Ok(None) => Err("Keynote took longer than 4 minutes and was stopped. Save the slides as a PDF from PowerPoint instead.".into()),
-        Ok(Some((status, _out, err))) => {
-            let pdf = fs::read(&output).unwrap_or_default();
-            if status.success() && is_pdf(&pdf) {
-                return Ok(pdf);
-            }
-            let detail = tail_text(&err, 200);
-            if detail.contains("-10814") || detail.contains("-2741") {
-                return Err("Keynote could not be found on this Mac. If it is installed, open it once, then try again; or save the slides as a PDF from PowerPoint.".into());
-            }
-            if detail.contains("-1743") {
-                return Err("Bloom is not allowed to use Keynote. Allow it in System Settings → Privacy & Security → Automation → Bloom, then try again.".into());
-            }
-            if detail.is_empty() {
-                Err("Keynote could not turn this file into a PDF. Save the slides as a PDF from PowerPoint instead.".into())
-            } else {
-                Err(format!("Keynote could not turn this file into a PDF ({detail}). Save the slides as a PDF from PowerPoint instead."))
-            }
-        }
+    fs::write(&script, KEYNOTE_EXPORT.replace("{ID}", &id)).map_err(|e| e.to_string())?;
+    let (mut ok, mut detail) = run_keynote_export(&script, &input, &output)?;
+    let unknown = |d: &str| d.contains("-1728") || d.contains("-10814") || d.contains("-2741");
+    if !ok && unknown(detail.as_str()) {
+        // macOS does not know Keynote under its id yet: register it, then try once more
+        let _ = Command::new(LSREGISTER).arg("-f").arg(&app).status();
+        let again = run_keynote_export(&script, &input, &output)?;
+        ok = again.0;
+        detail = again.1;
+    }
+    let pdf = fs::read(&output).unwrap_or_default();
+    if ok && is_pdf(&pdf) {
+        return Ok(pdf);
+    }
+    let which = format!("{} ({id})", app.display());
+    if unknown(detail.as_str()) {
+        return Err(format!("macOS could not hand the slides to Keynote ({which}). Open Keynote once, then try again; or save the slides as a PDF from PowerPoint."));
+    }
+    if detail.contains("-1743") {
+        return Err("Bloom is not allowed to use Keynote. Allow it in System Settings → Privacy & Security → Automation → Bloom, then try again.".into());
+    }
+    if detail.is_empty() {
+        Err(format!("Keynote ({which}) could not turn this file into a PDF. Save the slides as a PDF from PowerPoint instead."))
+    } else {
+        Err(format!("Keynote ({which}) could not turn this file into a PDF ({detail}). Save the slides as a PDF from PowerPoint instead."))
     }
 }
 
