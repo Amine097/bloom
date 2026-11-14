@@ -3,6 +3,7 @@ import { today, weekOf, addDays } from "./dates.js";
 import { nextRecall, stateOf } from "./recall.js";
 import { seedData } from "./seed.js";
 import { migrateQuiz } from "./notebook-core.js";
+import { migrateBank } from "./quiz-core.js";
 
 const KEY = "bloom_data";
 const tauri = window.__TAURI__;
@@ -38,7 +39,12 @@ function migrate(data) {
   // v4: a notebook entry may also carry `cards` (flashcards, see cards-core.js) and `chat` (the Ask
   // tab, see chat-core.js), and D.planner holds the week's plan (see planner-core.js). All are
   // optional and read with defaults, so there is nothing to convert.
-  data.version = 4;
+  // v5: quizzes span one or more lectures and bring questions back after a few quizzes (see
+  // quiz-core.js): each bank counts its `quizzes`, each question its `streak` and `lastQuiz`, and
+  // D.quizLog keeps the last finished quizzes. Existing questions and scores are all kept.
+  for (const nb of Object.values(data.notebook)) if (nb?.quiz) migrateBank(nb.quiz);
+  if (!Array.isArray(data.quizLog)) data.quizLog = [];
+  data.version = 5;
   return data;
 }
 

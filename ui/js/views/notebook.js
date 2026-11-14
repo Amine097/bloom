@@ -1,8 +1,9 @@
 // Notebook: a study guide and a quiz for each lecture PDF, written by Claude Code on this Mac.
-// The quiz is a bank of questions per lecture; each session draws a few of them, favouring the
-// ones never asked and the ones missed last time.
+// Each lecture keeps a bank of questions. A quiz spans one or more lectures: she picks them, the
+// number of questions and the difficulty; Bloom has Claude write what is missing first, then draws
+// the missed questions, the new ones and those due again (see quiz-core.js).
 import { D, save, uid, isLecture, itemsList, itemWeek, modulesSorted, moduleOf } from "../store.js";
-import { today, relDay, fmtDay } from "../dates.js";
+import { today, relDay, fmtDay, fmtWday } from "../dates.js";
 import { setStep } from "../recall.js";
 import { esc, icon, app, openViewer, confirmBox, cvar, toast, select } from "../ui.js";
 import { pdfUrl } from "../files.js";
@@ -10,32 +11,32 @@ import { runJob, isRunning, setupNeeded } from "./notebook-jobs.js";
 import { cardsTab } from "./notebook-cards.js";
 import { chatTab } from "./notebook-chat.js";
 import {
-  guidePrompt, quizPrompt, parseGuide, parseQuiz, mergeQuestions, pickSession, shuffled,
-  withAnswer, withSession, BANK_MAX, pickModuleSession,
+  guidePrompt, quizPrompt, parseGuide, parseQuiz, mergeQuestions, shuffled, withSession, BANK_MAX,
 } from "../notebook-core.js";
+import { planQuiz, drawQuiz, answered, standings, examGroups, SIZES, LOG_KEPT } from "../quiz-core.js";
 
 const LETTERS = ["A", "B", "C", "D"];
 const COUNTS = [5, 10, 15];
-const MODULE_LENS = [10, 20, 30];
 /** The key of the "No module" group (module ids never look like this). */
 const NO_MODULE = "-";
 const LEVEL_CHOICES = [["mixed", "Mixed"], ["recall", "Recall"], ["understanding", "Understanding"], ["application", "Application"]];
 const LEVEL_NAME = { recall: "Recall", understanding: "Understanding", application: "Application" };
+/** How many lectures Claude writes questions for at the same time before a quiz. */
+const PARALLEL = 3;
 
 /**
- * Survives changes of view and is never saved: which lecture and tab are open, the choices for the
- * next generation and session, and the session being played.
- * play = { lecture, quiz, module, items: [{ lecture, id, order }], i, picks: [stored option index],
- *          right: [bool], retry, done, score, total, missed: [items of `items`] }
- * A lecture session has `lecture` and `quiz` (its bank) and `module: null`; a module session has
- * `module` (a module id or NO_MODULE) and `lecture: null, quiz: null`. Each item names the lecture
- * whose bank holds its question (question ids are only unique within one bank).
- * mod: the module whose quiz page is open (instead of a lecture), or null. off: per module, the
- * lectures she unticked for the module quiz. modLen: questions per module session.
+ * Survives changes of view and is never saved.
+ * page: "lecture" (a lecture and its tabs) or "quiz" (the quiz page). sel: the open lecture.
+ * open: module groups unfolded in the sidebar. pick: lectures ticked for the next quiz; unfold:
+ * module groups unfolded in the quiz chooser. size, level: the next quiz's length and difficulty.
+ * prep: while Claude writes the questions a quiz needs, { lectures, size, level, jobs: { id: state } }
+ * with state "wait" | "run" | "done" | "fail". play: the quiz being played or just finished,
+ * { lectures, size, level, items: [{ lecture, id, order }], i, picks: [stored option index],
+ *   right: [bool], retry, done, score, total, missed: [items] }.
  */
 const view = {
-  sel: null, tab: "guide", play: null, len: 10, genCount: 10, genLevel: "mixed", showBank: false,
-  mod: null, off: {}, modLen: 10,
+  page: "lecture", sel: null, tab: "guide", open: new Set(), pick: new Set(), unfold: new Set(),
+  size: 10, level: "mixed", prep: null, play: null, genCount: 10, genLevel: "mixed", showBank: false,
 };
 /**
  * Tabs built in their own files, shown after "Study guide" and "Quiz". Each one is
@@ -60,16 +61,10 @@ const findQ = (z, qid) => z?.questions.find(x => x.id === qid) || null;
 /** The question of a session item, looked up in its own lecture's bank; null when it is gone. */
 const qOf = item => (item ? findQ(bankOf(item.lecture), item.id) : null);
 const qCount = id => bankOf(id)?.questions.length ?? 0;
-/**
- * The session on screen, if any. A lecture session belongs to the open lecture and to its current
- * bank; a module session belongs to the open module quiz page.
- */
-const activePlay = () => {
-  const p = view.play;
-  if (!p) return null;
-  if (p.module !== null) return view.mod === p.module ? p : null;
-  return view.mod === null && p.lecture === view.sel && p.quiz === bankOf(view.sel) ? p : null;
-};
+/** The quiz on screen: only on the quiz page. */
+const activePlay = () => (view.page === "quiz" ? view.play : null);
+/** A lecture's group key: its module, or NO_MODULE. */
+const groupKey = it => (D.modules[it.module] ? it.module : NO_MODULE);
 
 /** Lectures that have a PDF, grouped by module in the usual module order. `key` is the module id or NO_MODULE. */
 function groups() {
@@ -81,12 +76,12 @@ function groups() {
   return out.filter(g => g.items.length);
 }
 
-/** The sidebar entry of a module's quiz, shown once one of its lectures has questions. */
-function sideModule(g) {
-  if (!g.items.some(it => qCount(it.id))) return "";
-  return `<button class="side-item nbm-side ${view.mod === g.key ? "on" : ""}" data-act="nbmOpen" data-mod="${esc(g.key)}" ${cvar(g.color)} title="Quiz yourself on several lectures of ${esc(g.name)}">
-    ${icon("todo", 16)}<span>Quiz this module</span>
-  </button>`;
+/** A module in the sidebar: its name folds and unfolds its lectures. */
+function sideGroup(g) {
+  const open = view.open.has(g.key);
+  return `<button class="side-h nb-group ${open ? "open" : ""}" data-act="toggleGroup" data-key="${esc(g.key)}" aria-expanded="${open}" ${cvar(g.color)}>
+      <span class="dot"></span><span class="nb-group-name">${esc(g.name)}</span><small>${g.items.length}</small><i class="nb-chev" aria-hidden="true"></i>
+    </button>${open ? g.items.map(sideItem).join("") : ""}`;
 }
 
 function sideItem(it) {
@@ -96,7 +91,7 @@ function sideItem(it) {
     const what = state === "busy" ? `${label}: Claude is working` : has[kind] ? `${label}: ready` : `${label}: not made yet`;
     return `<i class="nb-mark ${state}" title="${what}">${icon(state === "busy" ? "clock" : ic, 14)}</i>`;
   };
-  return `<button class="side-item ${view.mod === null && view.sel === it.id ? "on" : ""}" data-act="select" data-id="${it.id}" ${cvar(moduleOf(it).color)} title="${esc(it.title)}">
+  return `<button class="side-item ${view.page === "lecture" && view.sel === it.id ? "on" : ""}" data-act="select" data-id="${it.id}" ${cvar(moduleOf(it).color)} title="${esc(it.title)}">
     <span class="dot"></span><span>${esc(it.title)}</span>
     <small class="nb-marks">${mark("guide", "note", "Study guide")}${mark("quiz", "todo", "Quiz")}</small>
   </button>`;
@@ -143,61 +138,52 @@ function guideTab(id) {
   </section>`;
 }
 
-// ---- quiz
+// ---- quiz: the lecture's tab (its bank) and the quiz page (one or more lectures)
 
-/** How many questions and of which kind Claude should write next. */
+/** How many questions and of which kind Claude should write next, from the lecture's tab. */
 function genControls(label, room) {
   const counts = COUNTS.map(n => [n, `${n} questions`]);
   const asked = Math.min(view.genCount, room);
   return `<div class="toolbar nb-gen">
       ${select("count", counts, view.genCount, 'class="pill-select" data-change="genCount" aria-label="How many questions"')}
       ${select("level", LEVEL_CHOICES, view.genLevel, 'class="pill-select" data-change="genLevel" aria-label="Kind of questions"')}
-      <button class="btn primary" data-act="generate" data-kind="quiz">${icon("spark", 16)} ${label}</button>
+      <button class="btn ghost" data-act="generate" data-kind="quiz">${icon("spark", 16)} ${label}</button>
     </div>
     ${asked < view.genCount ? `<p class="small muted">The bank has room for ${room} more, so Claude writes ${asked}.</p>` : ""}`;
 }
 
-function quizHead(z) {
-  const b = z.best;
-  const info = `${z.questions.length} question${z.questions.length === 1 ? "" : "s"}${b ? ` · best ${b.score}/${b.total}` : ""}`;
-  return `<div class="card-h"><h3>Quiz</h3><span class="muted small">${info}</span><span class="grow"></span></div>`;
+/** "3 to review · 4 new · 5 resting" for a bank. */
+function standingLine(z) {
+  const s = standings(z);
+  return [s.missed && `${s.missed} to review`, s.new && `${s.new} new`, s.due && `${s.due} due again`, s.resting && `${s.resting} resting`]
+    .filter(Boolean).join(" · ");
 }
 
-function quizEmpty(id) {
-  if (isRunning(id, "quiz")) return `<section class="card">${spinner("quiz")}</section>`;
-  return `<section class="card"><div class="empty nb-wait">
-    <p class="lead">No quiz questions yet.</p>
-    <p class="small">Claude reads the PDF and writes multiple-choice questions, each with an explanation and its page. They go into this lecture's question bank; every session draws from it.</p>
-    ${genControls("Generate questions", BANK_MAX)}
-  </div></section>`;
-}
-
-function startCard(z) {
-  const n = z.questions.length;
-  const fresh = z.questions.filter(x => !x.seen).length;
-  const missed = z.questions.filter(x => x.seen && x.lastRight === false).length;
-  const lens = [...COUNTS.slice(0, 2).filter(k => k < n), "all"];
-  const len = view.len === "all" || view.len >= n ? "all" : view.len;
-  const chips = lens.map(k => `<button class="chip ${len === k ? "on" : ""}" data-act="setLen" data-len="${k}" aria-pressed="${len === k}">${k === "all" ? `All ${n}` : k}</button>`).join("");
-  const hist = (z.sessions || []).slice().reverse()
+/** The lecture's Quiz tab: what its bank holds, a button to quiz it, and the bank itself. */
+function quizTab(id) {
+  const z = bankOf(id);
+  const n = z?.questions.length ?? 0;
+  const busy = isRunning(id, "quiz");
+  const hist = (z?.sessions || []).slice(-6).reverse()
     .map(s => `<span class="pill">${esc(s.date ? fmtDay(s.date) : "")} · ${esc(s.score)}/${esc(s.total)}</span>`).join("");
-  const status = [fresh && `${fresh} never asked`, missed && `${missed} missed last time`].filter(Boolean).join(" · ");
-  return `<section class="card">${quizHead(z)}
+  const top = `<section class="card">
+    <div class="card-h"><h3>Quiz</h3><span class="muted small">${n ? `${n} question${n === 1 ? "" : "s"}${z.best ? ` · best ${z.best.score}/${z.best.total}` : ""}` : "no questions yet"}</span></div>
     <div class="empty nb-wait">
-      <p class="lead">${n} question${n === 1 ? "" : "s"} in the bank.</p>
-      <p class="small">${status ? `${status}. ` : ""}Each session asks those first, then the ones you have not seen for longest.</p>
-      <div class="toolbar nb-len" role="group" aria-label="Questions per session"><span class="small">Questions per session</span>${chips}</div>
-      <div class="btns center"><button class="btn primary" data-act="startQuiz">Start a session</button></div>
-      ${hist ? `<p class="small">Last sessions</p><div class="nb-hist">${hist}</div>` : ""}
+      <p class="lead">${n ? standingLine(z) || `${n} questions` : "Start a quiz: Bloom has Claude write the questions first."}</p>
+      <p class="small">Missed questions come back in your next quiz of this lecture; the ones you got right return after a few quizzes.</p>
+      ${busy ? `<p class="small" role="status"><span class="nb-spin small" aria-hidden="true"></span> Claude is writing questions for this lecture…</p>` : ""}
+      <div class="btns center"><button class="btn primary" data-act="quizLecture">${icon("todo", 16)} Quiz this lecture</button></div>
+      ${hist ? `<p class="small">Last quizzes</p><div class="nb-hist">${hist}</div>` : ""}
     </div>
   </section>`;
+  return z && n ? top + bankCard(id, z) : top + `<section class="card"><div class="card-b">
+      <p class="small muted">Or have Claude write questions now, without starting a quiz:</p>${genControls("Write questions", BANK_MAX)}</div></section>`;
 }
 
 function bankCard(id, z) {
   const n = z.questions.length;
   const room = BANK_MAX - n;
-  const add = isRunning(id, "quiz")
-    ? `<p class="small" role="status"><span class="nb-spin small" aria-hidden="true"></span> Claude is reading the PDF and writing new questions…</p>`
+  const add = isRunning(id, "quiz") ? ""
     : room > 0
       ? `<p class="small muted">Claude writes new questions and is told which ones you already have, so it does not repeat them.</p>${genControls("Add more questions", room)}`
       : `<p class="small muted">The bank is full. Delete the questions you no longer need to make room for new ones.</p>`;
@@ -216,29 +202,32 @@ function bankCard(id, z) {
   </section>`;
 }
 
-/** The lecture a module-quiz question comes from. */
+/** The lecture a question comes from, shown when a quiz spans several lectures. */
 const fromTag = lecture => `<p class="nbm-from">${icon("book", 14)}<span>${esc(D.items[lecture]?.title ?? "A deleted lecture")}</span></p>`;
 
-/** `head` is the card header: the lecture's quiz header, or the module quiz's. */
-function sessionCard(head, p) {
+const quizHead = (title, info) => `<div class="card-h"><h3>${title}</h3>${info ? `<span class="muted small">${info}</span>` : ""}<span class="grow"></span></div>`;
+const lecturesInfo = ids => (ids.length === 1 ? esc(D.items[ids[0]]?.title ?? "") : `${ids.length} lectures`);
+
+function sessionCard(p) {
   const item = p.items[p.i];
   const x = qOf(item);
   const total = p.items.length;
   const picked = p.picks[p.i];
-  const answered = picked !== undefined;
+  const answered_ = picked !== undefined;
   const opts = item.order.map((s, k) => {
-    const cls = !answered ? "" : s === x.answer ? "right" : s === picked ? "wrong" : "";
-    return `<button class="nb-opt ${cls}" data-act="pick" data-k="${k}" ${answered ? "disabled" : ""}><b>${LETTERS[k]}</b><span>${esc(x.options[s])}</span></button>`;
+    const cls = !answered_ ? "" : s === x.answer ? "right" : s === picked ? "wrong" : "";
+    return `<button class="nb-opt ${cls}" data-act="pick" data-k="${k}" ${answered_ ? "disabled" : ""}><b>${LETTERS[k]}</b><span>${esc(x.options[s])}</span></button>`;
   }).join("");
   const last = p.i === total - 1;
   const ok = picked === x.answer;
-  return `<section class="card">${head}
+  return `<section class="card">${quizHead(p.retry ? "Retry" : "Quiz", lecturesInfo(p.lectures))}
     <div class="card-b">
-      <div class="nb-progress"><span class="muted small">${p.retry ? "Retry · " : ""}Question ${p.i + 1} of ${total}</span>${levelTag(x.level)}<span class="grow"></span><button class="btn ghost small" data-act="quitQuiz">Stop</button></div>
-      ${p.module !== null ? fromTag(item.lecture) : ""}
+      <div class="nb-progress"><span class="muted small">Question ${p.i + 1} of ${total}</span>${levelTag(x.level)}<span class="grow"></span><button class="btn ghost small" data-act="quitQuiz">Stop</button></div>
+      <div class="nb-bar" aria-hidden="true"><i style="width:${Math.round(100 * p.i / total)}%"></i></div>
+      ${p.lectures.length > 1 ? fromTag(item.lecture) : ""}
       <p class="nb-q">${esc(x.q)}</p>
       <div class="nb-opts">${opts}</div>
-      ${answered ? `<div class="nb-why ${ok ? "right" : "wrong"}">
+      ${answered_ ? `<div class="nb-why ${ok ? "right" : "wrong"}">
           <b>${ok ? "Right!" : `Not quite: the answer is ${LETTERS[item.order.indexOf(x.answer)]}.`}</b>
           <span>${esc(x.why)}</span>${pageTag(x.page, item.lecture)}
         </div>
@@ -252,14 +241,14 @@ function sessionCard(head, p) {
   </section>`;
 }
 
-const scoreMsg = (score, total, what = "the lecture") => (total === 0 ? "No questions left in this session."
+const scoreMsg = (score, total, what) => (total === 0 ? "No questions left in this quiz."
   : score === total ? "Perfect score! 🌷" : score >= total * 0.75 ? "Very good! 🌸"
     : score >= total / 2 ? "Good start. Have another look at the ones you missed." : `Worth another read of ${what}, then try again.`);
 
-/** The questions missed in a finished session that are still in their bank, as review entries. */
+/** The questions missed in a finished quiz that are still in their bank, as review entries. */
 function missedReview(p) {
   return p.missed.map(m => ({ m, x: qOf(m), k: p.items.indexOf(m) })).filter(r => r.x).map(({ m, x, k }) => `<li class="nb-why wrong">
-      ${p.module !== null ? fromTag(m.lecture) : ""}
+      ${p.lectures.length > 1 ? fromTag(m.lecture) : ""}
       <p class="nb-rq">${esc(x.q)}</p>
       <p><span class="muted">Your answer:</span> ${esc(x.options[p.picks[k]])}</p>
       <p><span class="muted">Right answer:</span> <b>${esc(x.options[x.answer])}</b></p>
@@ -267,95 +256,9 @@ function missedReview(p) {
     </li>`);
 }
 
-function resultCard(id, z, p) {
-  const it = D.items[id];
-  const { score, total } = p;
-  const msg = scoreMsg(score, total);
-  const missed = missedReview(p);
-  const review = missed.join("");
-  return `<section class="card">${quizHead(z)}
-    <div class="empty nb-wait">
-      <p class="nb-score">${score}<small>/${total}</small></p>
-      <p class="lead">${msg}</p>
-      ${p.retry ? `<p class="small">Retry rounds do not count toward your best score.</p>` : ""}
-      ${it.quizzedAt ? `<p class="small">This lecture is marked as quizzed.</p>` : ""}
-      <div class="btns center">
-        ${missed.length ? `<button class="btn primary" data-act="retryMissed">${icon("repeat", 16)} Retry the ones I missed</button>` : ""}
-        ${it.quizzedAt ? "" : `<button class="btn ${missed.length ? "ghost" : "primary"}" data-act="markQuizzed">${icon("check", 16)} Mark the lecture as quizzed</button>`}
-        <button class="btn ghost" data-act="startQuiz">New session</button>
-      </div>
-    </div>
-    ${review ? `<div class="card-b"><h4 class="nb-h">What you missed</h4><ol class="nb-review">${review}</ol></div>` : ""}
-  </section>`;
-}
-
-function quizTab(id) {
-  const z = bankOf(id);
-  if (!z || !z.questions.length) return quizEmpty(id);
-  let p = activePlay();
-  if (p && !p.done && !qOf(p.items[p.i])) p = view.play = null; // its question is gone
-  if (p && !p.done) return sessionCard(quizHead(z), p);
-  return `${p ? resultCard(id, z, p) : startCard(z)}${bankCard(id, z)}`;
-}
-
-// ---- module quiz: one session drawn from the banks of several lectures of one module
-
-/** The lectures of group `g` that have questions, and those that have none yet. */
-const splitGroup = g => ({ withQ: g.items.filter(it => qCount(it.id)), without: g.items.filter(it => !qCount(it.id)) });
-/** Unticked lectures of a module; everything else is ticked, new lectures too. */
-const offSet = key => (view.off[key] ??= new Set());
-const ticked = g => splitGroup(g).withQ.filter(it => !offSet(g.key).has(it.id));
-
-function moduleHead(g, info) {
-  return `<div class="card-h"><h3>Module quiz</h3><span class="muted small">${esc(g.name)}${info ? ` · ${info}` : ""}</span><span class="grow"></span></div>`;
-}
-
-function moduleChooser(g) {
-  const { withQ, without } = splitGroup(g);
-  const off = offSet(g.key);
-  const on = ticked(g);
-  const qs = on.flatMap(it => bankOf(it.id).questions);
-  const avail = qs.length;
-  const fresh = qs.filter(x => !x.seen).length;
-  const missed = qs.filter(x => x.seen && x.lastRight === false).length;
-  const rows = withQ.map(it => {
-    const z = bankOf(it.id);
-    const n = z.questions.length;
-    const never = z.questions.filter(x => !x.seen).length;
-    return `<label class="row nbm-row">
-      <input type="checkbox" data-change="nbmTick" data-id="${esc(it.id)}" ${off.has(it.id) ? "" : "checked"}>
-      <span class="row-main"><span class="t">${esc(it.title)}</span>
-        <span class="sub"><span>${n} question${n === 1 ? "" : "s"}</span>${never ? `<span>${never} never asked</span>` : ""}</span></span>
-    </label>`;
-  }).join("") + without.map(it => `<div class="row nbm-row off">
-      <input type="checkbox" disabled aria-label="No questions yet">
-      <span class="row-main"><span class="t">${esc(it.title)}</span><span class="sub"><span>no questions yet</span></span></span>
-      <button class="btn ghost small" data-act="nbmLecture" data-id="${esc(it.id)}" title="Open this lecture's quiz to make questions">${icon("spark", 15)} Make questions</button>
-    </div>`).join("");
-  const lens = [...MODULE_LENS.filter(k => k < avail), "all"];
-  const len = view.modLen === "all" || view.modLen >= avail ? "all" : view.modLen;
-  const chips = lens.map(k => `<button class="chip ${len === k ? "on" : ""}" data-act="nbmLen" data-len="${k}" aria-pressed="${len === k}">${k === "all" ? `All ${avail}` : k}</button>`).join("");
-  const status = [fresh && `${fresh} never asked`, missed && `${missed} missed last time`].filter(Boolean).join(" · ");
-  const lect = `${on.length} lecture${on.length === 1 ? "" : "s"}`;
-  return `<section class="card">
-    <div class="card-h"><h3>Lectures to quiz</h3><span class="muted small">${on.length} of ${withQ.length} ticked</span><span class="grow"></span>
-      <button class="btn ghost small" data-act="nbmAll" ${on.length === withQ.length ? "disabled" : ""}>Select all</button>
-      <button class="btn ghost small" data-act="nbmNone" ${on.length ? "" : "disabled"}>Clear</button>
-    </div>
-    <div class="card-b nbm-list">${rows}</div>
-    <div class="empty nb-wait nbm-start">
-      ${avail ? `<p class="lead">${avail} question${avail === 1 ? "" : "s"} from ${lect}.</p>
-        <p class="small">${status ? `${status}. ` : ""}Each lecture takes its turn, so every one you tick gets its share; within a lecture, those come first.</p>
-        <div class="toolbar nb-len" role="group" aria-label="Questions per session"><span class="small">Questions per session</span>${chips}</div>
-        <div class="btns center"><button class="btn primary" data-act="nbmStart">Start a session</button></div>`
-      : `<p class="lead">Tick at least one lecture to start.</p>`}
-    </div>
-  </section>`;
-}
-
-/** How she did on each lecture of a finished module session, in the module's lecture order. */
-function breakdown(g, p) {
-  const rank = new Map(g.items.map((it, k) => [it.id, k]));
+/** How she did on each lecture of a finished quiz over several lectures. */
+function breakdown(p) {
+  if (p.lectures.length < 2) return "";
   const by = new Map();
   p.items.forEach((m, k) => {
     const r = by.get(m.lecture) || { score: 0, total: 0 };
@@ -363,43 +266,127 @@ function breakdown(g, p) {
     if (p.right[k]) r.score += 1;
     by.set(m.lecture, r);
   });
-  const rows = [...by].sort(([a], [b]) => (rank.get(a) ?? 1e9) - (rank.get(b) ?? 1e9)).map(([id, r]) =>
+  const rows = [...by].map(([id, r]) =>
     `<li class="${r.score === r.total ? "ok" : ""}"><span>${esc(D.items[id]?.title ?? "A deleted lecture")}</span><b>${r.score}/${r.total}</b></li>`).join("");
   return rows ? `<ul class="nbm-break">${rows}</ul>` : "";
 }
 
-function moduleResult(g, p) {
+function resultCard(p) {
   const { score, total } = p;
   const missed = missedReview(p);
-  return `<section class="card">${moduleHead(g, "")}
+  const notQuizzed = [...new Set(p.items.map(m => m.lecture))].filter(id => D.items[id] && !D.items[id].quizzedAt);
+  const what = p.lectures.length === 1 ? "the lecture" : "those lectures";
+  return `<section class="card">${quizHead(p.retry ? "Retry" : "Quiz", lecturesInfo(p.lectures))}
     <div class="empty nb-wait">
       <p class="nb-score">${score}<small>/${total}</small></p>
-      <p class="lead">${scoreMsg(score, total, "those lectures")}</p>
-      ${p.retry ? `<p class="small">A retry round: only the questions you missed.</p>` : ""}
-      ${breakdown(g, p)}
+      <p class="lead">${scoreMsg(score, total, what)}</p>
+      ${p.retry ? `<p class="small">A retry round only asks what you missed, and does not change when questions come back.</p>` : ""}
+      ${breakdown(p)}
       <div class="btns center">
         ${missed.length ? `<button class="btn primary" data-act="retryMissed">${icon("repeat", 16)} Retry the ones I missed</button>` : ""}
-        <button class="btn ${missed.length ? "ghost" : "primary"}" data-act="nbmStart">New session</button>
+        <button class="btn ${missed.length ? "ghost" : "primary"}" data-act="quizAgain">Another quiz like this</button>
+        <button class="btn ghost" data-act="quizNew">Choose another quiz</button>
+        ${notQuizzed.length ? `<button class="btn ghost" data-act="markQuizzed">${icon("check", 16)} Mark ${notQuizzed.length === 1 ? "the lecture" : `these ${notQuizzed.length} lectures`} as quizzed</button>` : ""}
       </div>
     </div>
     ${missed.length ? `<div class="card-b"><h4 class="nb-h">What you missed</h4><ol class="nb-review">${missed.join("")}</ol></div>` : ""}
   </section>`;
 }
 
-/** The module quiz page: its session, or its result and the lecture chooser. */
-function modulePage(g) {
-  let p = activePlay();
-  if (p && !p.done && !qOf(p.items[p.i])) p = view.play = null; // its question is gone
-  const head = `<section class="card" ${cvar(g.color)}>
-    <div class="card-h"><span class="dot big"></span>
-      <div class="nb-title"><h2>${esc(g.name)}</h2><span class="muted small">Module quiz · questions from the lectures you choose</span></div>
+/** While Claude writes the questions the quiz needs. */
+function prepCard(prep) {
+  const label = { wait: "Waiting…", run: "Writing questions…", done: "Ready", fail: "Could not write questions" };
+  const rows = prep.lectures.map(id => {
+    const st = prep.jobs[id] || "done";
+    const mark = st === "run" ? '<span class="nb-spin small" aria-hidden="true"></span>' : st === "done" ? icon("check", 15) : st === "fail" ? icon("close", 15) : icon("clock", 15);
+    return `<li class="nbq-prep ${st}">${mark}<span class="nbq-t">${esc(D.items[id]?.title ?? "")}</span><small>${prep.jobs[id] ? label[st] : "Ready"}</small></li>`;
+  }).join("");
+  const n = Object.keys(prep.jobs).length;
+  return `<section class="card">${quizHead("Getting your quiz ready", lecturesInfo(prep.lectures))}
+    <div class="card-b">
+      <p class="lead">Claude is writing questions for ${n} lecture${n === 1 ? "" : "s"}. The quiz starts by itself when they are ready.</p>
+      <p class="small muted">It takes about half a minute per lecture, a few at a time. You can use the rest of Bloom meanwhile.</p>
+      <ul class="nbq-preps">${rows}</ul>
+      <div class="btns end"><button class="btn ghost small" data-act="quizCancel">Cancel</button></div>
     </div>
   </section>`;
-  if (p && !p.done) {
-    const n = new Set(p.items.map(m => m.lecture)).size;
-    return `${head}${sessionCard(moduleHead(g, `${n} lecture${n === 1 ? "" : "s"}`), p)}`;
-  }
-  return `${head}${p ? moduleResult(g, p) : ""}${moduleChooser(g)}`;
+}
+
+/** The lectures of the quiz chooser: by module, foldable, each with its bank's state. */
+function pickList(gs) {
+  return gs.map(g => {
+    const on = g.items.filter(it => view.pick.has(it.id)).length;
+    const all = on === g.items.length;
+    const open = view.unfold.has(g.key);
+    const rows = open ? g.items.map(it => {
+      const z = bankOf(it.id);
+      const info = z?.questions.length ? `${z.questions.length} questions${standingLine(z) ? ` · ${standingLine(z)}` : ""}` : "no questions yet: Claude writes them";
+      return `<label class="row nbq-lecture">
+        <input type="checkbox" data-change="quizTick" data-id="${esc(it.id)}" ${view.pick.has(it.id) ? "checked" : ""}>
+        <span class="row-main"><span class="t">${esc(it.title)}</span><span class="sub"><span>${info}</span></span></span>
+      </label>`;
+    }).join("") : "";
+    return `<div class="nbq-group" ${cvar(g.color)}>
+      <div class="nbq-group-h">
+        <label class="nbq-all"><input type="checkbox" data-change="quizTickGroup" data-key="${esc(g.key)}" ${all ? "checked" : ""} class="${on && !all ? "some" : ""}" aria-label="Every lecture of ${esc(g.name)}">
+          <span class="dot"></span><b>${esc(g.name)}</b></label>
+        <span class="muted small">${on ? `${on} of ${g.items.length}` : `${g.items.length} lecture${g.items.length === 1 ? "" : "s"}`}</span>
+        <span class="grow"></span>
+        <button class="btn ghost small" data-act="quizUnfold" data-key="${esc(g.key)}" aria-expanded="${open}">${open ? "Hide lectures" : "Choose lectures"}</button>
+      </div>${rows}
+    </div>`;
+  }).join("");
+}
+
+/** The quiz chooser: lectures, number of questions, difficulty, and what will happen. */
+function chooserCard(gs) {
+  const exams = examGroups(D.modules, today()).map(e => {
+    const n = e.ids.filter(id => gs.some(g => g.key === id)).length;
+    return n ? `<button class="chip" data-act="quizExam" data-date="${e.date}">${icon("cal", 14)} ${esc(fmtWday(e.date))} exam · ${n} module${n === 1 ? "" : "s"}</button>` : "";
+  }).join("");
+  const picked = pickedLectures(gs);
+  const plan = picked.length ? planQuiz(picked.map(bankFor), view.size, view.level) : [];
+  const toMake = plan.filter(p => p.make > 0).length;
+  const sizeChips = SIZES.map(k => `<button class="chip ${view.size === k ? "on" : ""}" data-act="quizSize" data-n="${k}" aria-pressed="${view.size === k}">${k}</button>`).join("");
+  const levelChips = LEVEL_CHOICES.map(([k, l]) => `<button class="chip ${view.level === k ? "on" : ""}" data-act="quizLevel" data-level="${k}" aria-pressed="${view.level === k}">${l}</button>`).join("");
+  const summary = !picked.length ? "Choose at least one lecture."
+    : `${view.size} questions from ${picked.length} lecture${picked.length === 1 ? "" : "s"}. ${toMake
+      ? `Claude first writes questions for ${toMake} of them (about half a minute each).` : "Ready to start."}`;
+  return `<section class="card">
+    ${quizHead("New quiz", "")}
+    <div class="card-b nbq">
+      ${exams ? `<div class="toolbar"><span class="small">Whole exam</span>${exams}</div>` : ""}
+      <div class="nbq-h"><h4 class="nb-h">Lectures</h4><span class="grow"></span>${view.pick.size ? `<button class="btn ghost small" data-act="quizClear">Clear</button>` : ""}</div>
+      <div class="nbq-list">${pickList(gs)}</div>
+      <div class="toolbar"><span class="small">Questions</span>${sizeChips}</div>
+      <div class="toolbar"><span class="small">Difficulty</span>${levelChips}</div>
+      <div class="nbq-go"><p class="small">${summary}</p><span class="grow"></span>
+        <button class="btn primary" data-act="quizStart" ${picked.length ? "" : "disabled"}>${icon("todo", 16)} Start the quiz</button></div>
+    </div>
+  </section>`;
+}
+
+/** The last finished quizzes. */
+function recentCard() {
+  const log = (D.quizLog || []).slice(-5).reverse();
+  if (!log.length) return "";
+  return `<section class="card">${quizHead("Recent quizzes", "")}
+    <div class="card-b"><ul class="nbm-break">${log.map(r => {
+      const names = r.lectures.map(id => D.items[id]?.title).filter(Boolean);
+      const label = names.length === 1 ? names[0] : `${names.length} lectures`;
+      return `<li class="${r.score === r.total ? "ok" : ""}"><span>${esc(fmtDay(r.date))} · ${esc(label)}</span><b>${r.score}/${r.total}</b></li>`;
+    }).join("")}</ul></div>
+  </section>`;
+}
+
+function quizPage(gs) {
+  const head = `<section class="card"><div class="card-h"><div class="nb-title"><h2>Quiz</h2>
+    <span class="muted small">Questions from the lectures you choose. Missed ones come back first; the ones you know return after a few quizzes.</span></div></div></section>`;
+  if (view.prep) return head + prepCard(view.prep);
+  let p = view.play;
+  if (p && !p.done && !qOf(p.items[p.i])) p = view.play = null; // its question is gone
+  if (p && !p.done) return head + sessionCard(p);
+  return head + (p ? resultCard(p) : "") + chooserCard(gs) + recentCard();
 }
 
 export function render() {
@@ -415,13 +402,12 @@ export function render() {
   }
   const all = gs.flatMap(g => g.items);
   if (!all.some(it => it.id === view.sel)) view.sel = all[0].id;
+  for (const id of view.pick) if (!all.some(it => it.id === id)) view.pick.delete(id); // lecture or PDF removed
   const it = all.find(x => x.id === view.sel);
+  if (!view.open.size) view.open.add(groupKey(it));
   const m = moduleOf(it);
   const setup = setupNeeded();
   const extra = extraTab();
-  // the module quiz page, while that module still has a lecture with questions
-  const g = view.mod === null ? null : gs.find(x => x.key === view.mod && x.items.some(y => qCount(y.id))) || null;
-  if (!g) view.mod = null;
 
   const warn = setup ? `<section class="card nb-warn"><div class="card-b">
       <p><b>${setup === "missing" ? "Claude is not set up yet." : "Claude is not signed in."}</b></p>
@@ -431,14 +417,18 @@ export function render() {
       <div class="btns"><button class="btn primary small" data-act="goSettings">Set up in Settings</button></div>
     </div></section>` : "";
 
+  const busyQuiz = view.prep || (view.play && !view.play.done);
   return `${head}
     <div class="todo nb">
       <aside class="todo-side nb-side">
-        ${gs.map(x => `<div class="side-h"><span>${esc(x.name)}</span></div>${sideModule(x)}${x.items.map(sideItem).join("")}`).join("")}
+        <button class="side-item nb-quiz ${view.page === "quiz" ? "on" : ""}" data-act="quizOpen">
+          ${icon("todo", 16)}<span>Quiz</span>${busyQuiz ? '<small class="nb-marks"><span class="nb-spin small" aria-hidden="true"></span></small>' : ""}
+        </button>
+        ${gs.map(sideGroup).join("")}
       </aside>
       <div class="todo-main nb-main">
         ${warn}
-        ${g ? modulePage(g) : `<section class="card" ${cvar(m.color)}>
+        ${view.page === "quiz" ? quizPage(gs) : `<section class="card" ${cvar(m.color)}>
           <div class="card-h"><span class="dot big"></span>
             <div class="nb-title"><h2>${esc(it.title)}</h2><span class="muted small">${esc(m.name)} · ${esc(it.pdf.name)}</span></div>
             <span class="grow"></span>
@@ -454,7 +444,7 @@ export function render() {
     </div>`;
 }
 
-/** The prompt for a job, built when it starts. */
+/** The prompt for a job started from a lecture's tab, built when it starts. */
 function promptFor(id, kind) {
   const title = D.items[id].title;
   if (kind === "guide") return guidePrompt(title);
@@ -463,24 +453,30 @@ function promptFor(id, kind) {
   return quizPrompt(title, { count: Math.min(view.genCount, room), level: view.genLevel, avoid: (z?.questions ?? []).map(x => x.q) });
 }
 
-/** Puts a finished job's result in the data. Returns the message for the toast. */
-function store(id, kind, data, title) {
+/** Adds the questions Claude wrote to lecture `id`'s bank. Returns the message for the toast. */
+function addQuestions(id, data, title) {
   const nb = (D.notebook[id] ??= {});
-  if (kind === "guide") {
-    nb.guide = { createdAt: today(), ...data };
-    return `The study guide for "${title}" is ready 🌸`;
-  }
   // into the bank as it is now: questions may have been deleted while Claude was writing
-  const z = bankOf(id) || (nb.quiz = { createdAt: today(), questions: [], best: null, sessions: [] });
+  const z = bankOf(id) || (nb.quiz = { createdAt: today(), questions: [], best: null, sessions: [], quizzes: 0 });
   const m = mergeQuestions(z.questions, data.questions, { date: today(), makeId: uid });
   if (!m.added.length) {
     throw new Error(m.overflow ? "The question bank is full. Delete some questions first."
       : "Claude only wrote questions that are already in the bank. Try again, perhaps with another kind of question.");
   }
+  for (const x of m.added) Object.assign(x, { streak: 0, lastQuiz: null });
   z.questions = m.questions;
   const left = [m.duplicates && `${m.duplicates} already in the bank`, data.skipped.length && `${data.skipped.length} not usable`]
     .filter(Boolean).join(", ");
   return `${m.added.length} new question${m.added.length === 1 ? "" : "s"} for "${title}" 🌸${left ? ` (left out: ${left})` : ""}`;
+}
+
+/** Puts a finished job's result in the data. Returns the message for the toast. */
+function store(id, kind, data, title) {
+  if (kind === "guide") {
+    (D.notebook[id] ??= {}).guide = { createdAt: today(), ...data };
+    return `The study guide for "${title}" is ready 🌸`;
+  }
+  return addQuestions(id, data, title);
 }
 
 /** Asks Claude for a study guide or quiz questions. Runs in the background; what exists stays usable meanwhile. */
@@ -489,25 +485,70 @@ function generate(id, kind) {
   runJob(id, kind, promptFor(id, kind), (text, now) => store(id, kind, KIND[kind].parse(text), now.title));
 }
 
-/** Starts a session of `items` ([{ lecture, id, order }]): of the open lecture, or of module `module`. */
-function startSession(items, retry, module = null) {
-  if (!items.length) return;
-  let owner = { lecture: null, quiz: null, module };
-  if (module === null) {
-    const z = bankOf(view.sel);
-    if (!z) return;
-    owner = { lecture: view.sel, quiz: z, module: null };
-  }
-  view.play = { ...owner, items, i: 0, picks: [], right: [], retry, done: false, score: 0, total: 0, missed: [] };
-  app.refresh();
+// ---- running a quiz
+
+/** Lectures with a PDF, grouped by module (see groups()), that are ticked for the next quiz. */
+const pickedLectures = (gs = groups()) => gs.flatMap(g => g.items).filter(it => view.pick.has(it.id)).map(it => it.id);
+const bankFor = id => ({ lecture: id, questions: bankOf(id)?.questions ?? [], quizzes: bankOf(id)?.quizzes ?? 0 });
+const scrollTop = () => { const main = document.getElementById("main"); if (main) main.scrollTop = 0; };
+
+/** Has Claude write `count` questions at `level` for lecture `id`, quietly. Resolves true when some were added. */
+function makeQuestions(id, count, level) {
+  const z = bankOf(id);
+  const prompt = quizPrompt(D.items[id].title, { count, level, avoid: (z?.questions ?? []).map(x => x.q) });
+  return runJob(id, "quiz", prompt, (text, now) => { addQuestions(id, parseQuiz(text), now.title); });
 }
 
-/** Starts a module session from the lectures ticked on the module quiz page. */
-function startModule() {
-  const g = view.mod === null ? null : groups().find(x => x.key === view.mod);
-  if (!g) return;
-  const banks = ticked(g).map(it => ({ lecture: it.id, questions: bankOf(it.id).questions }));
-  startSession(pickModuleSession(banks, view.modLen), false, g.key);
+/** Runs `work(item)` for every item, at most `n` at a time. */
+async function pool(items, n, work) {
+  const queue = [...items];
+  await Promise.all(Array.from({ length: Math.min(n, queue.length) }, async () => {
+    while (queue.length) await work(queue.shift());
+  }));
+}
+
+/** Prepares and starts a quiz of `size` questions at `level` over `lectures`. */
+async function startQuiz(lectures, size, level) {
+  if (!lectures.length || view.prep) return;
+  const todo = planQuiz(lectures.map(bankFor), size, level).filter(p => p.make > 0);
+  view.page = "quiz";
+  view.play = null;
+  if (todo.length) {
+    const prep = { lectures, size, level, jobs: Object.fromEntries(todo.map(p => [p.lecture, "wait"])) };
+    view.prep = prep;
+    app.refresh();
+    await pool(todo, PARALLEL, async p => {
+      if (view.prep !== prep) return; // cancelled
+      prep.jobs[p.lecture] = "run";
+      app.refresh();
+      prep.jobs[p.lecture] = await makeQuestions(p.lecture, p.make, level) ? "done" : "fail";
+      app.refresh();
+    });
+    if (view.prep !== prep) return;
+    view.prep = null;
+    const failed = Object.values(prep.jobs).filter(s => s === "fail").length;
+    if (failed) toast(`Claude could not write questions for ${failed} lecture${failed === 1 ? "" : "s"}; the quiz uses what is there.`, "error");
+  }
+  begin(lectures, size, level);
+}
+
+/** Draws the quiz and starts it; a retry asks `items` again without counting it. */
+function begin(lectures, size, level, items = null) {
+  const retry = Boolean(items);
+  const live = lectures.filter(id => D.items[id]);
+  const chosen = items || drawQuiz(live.map(bankFor), size, level);
+  if (!chosen.length) {
+    view.play = null;
+    toast("There are no questions to ask yet for these lectures.", "error");
+    app.refresh();
+    return;
+  }
+  if (!retry) for (const id of new Set(chosen.map(m => m.lecture))) { const z = bankOf(id); if (z) z.quizzes = (z.quizzes || 0) + 1; }
+  view.play = { lectures: live, size, level, items: chosen, i: 0, picks: [], right: [], retry, done: false, score: 0, total: 0, missed: [] };
+  view.page = "quiz";
+  save();
+  app.refresh();
+  scrollTop();
 }
 
 /** Answers the question on screen with the option shown at position k. */
@@ -522,7 +563,8 @@ function choose(k) {
   const right = s === z.questions[at].answer;
   p.picks[p.i] = s;
   p.right[p.i] = right;
-  z.questions[at] = withAnswer(z.questions[at], right, today());
+  // a retry comes right after seeing the answers: it does not change when questions come back
+  if (!p.retry) z.questions[at] = answered(z.questions[at], right, today(), z.quizzes || 0);
   save();
   app.refresh();
 }
@@ -532,8 +574,18 @@ function finish(p) {
   p.total = p.items.length;
   p.score = p.right.filter(Boolean).length;
   p.missed = p.items.filter((_, k) => !p.right[k]);
-  // a module session leaves each lecture's own best score and sessions alone
-  if (!p.retry && p.total && p.module === null) Object.assign(p.quiz, withSession(p.quiz, { date: today(), score: p.score, total: p.total }));
+  if (!p.retry && p.total) {
+    // each lecture keeps its own part of the score; the log keeps the whole quiz
+    const by = new Map();
+    p.items.forEach((m, k) => {
+      const r = by.get(m.lecture) || { score: 0, total: 0 };
+      r.total += 1;
+      if (p.right[k]) r.score += 1;
+      by.set(m.lecture, r);
+    });
+    for (const [id, r] of by) { const z = bankOf(id); if (z) Object.assign(z, withSession(z, { date: today(), ...r })); }
+    D.quizLog = [...(D.quizLog || []), { date: today(), lectures: [...by.keys()], score: p.score, total: p.total, level: p.level }].slice(-LOG_KEPT);
+  }
   save();
 }
 
@@ -545,12 +597,12 @@ function next() {
   app.refresh();
 }
 
-/** Keyboard during a session: 1–4 or A–D answers, Enter or Space goes on. Called by main.js. */
+/** Keyboard during a quiz: 1–4 or A–D answers, Enter or Space goes on. Called by main.js. */
 export function onKey(e) {
-  if (view.mod === null) { // a lecture is open (the module quiz page has no tabs)
+  if (view.page !== "quiz") {
     const extra = extraTab();
-    if (extra) { extra.onKey?.(e, view.sel); return; }
-    if (view.tab !== "quiz") return;
+    if (extra) extra.onKey?.(e, view.sel);
+    return;
   }
   const p = activePlay();
   if (!p || p.done) return;
@@ -563,7 +615,7 @@ export function onKey(e) {
     return;
   }
   if (key === "Enter" || key === " ") {
-    if (e.target.closest?.("button, a, summary, label")) return; // the focused control acts on its own
+    if (e.target.closest?.("button, a, summary, label, input")) return; // the focused control acts on its own
     if (p.picks[p.i] === undefined) return;
     e.preventDefault();
     next();
@@ -572,7 +624,18 @@ export function onKey(e) {
 
 export const actions = {
   ...Object.assign({}, ...EXTRA_TABS.map(t => t.actions)),
-  select: el => { view.sel = el.dataset.id; view.mod = null; app.refresh(); },
+  select: el => {
+    view.sel = el.dataset.id;
+    view.page = "lecture";
+    if (D.items[view.sel]) view.open.add(groupKey(D.items[view.sel]));
+    app.refresh();
+    scrollTop();
+  },
+  toggleGroup: el => {
+    const k = el.dataset.key;
+    if (view.open.has(k)) view.open.delete(k); else view.open.add(k);
+    app.refresh();
+  },
   tab: el => { view.tab = el.dataset.tab; app.refresh(); },
   goCourses: () => app.go("courses"),
   goSettings: () => app.go("settings"),
@@ -596,33 +659,46 @@ export const actions = {
     try { openViewer(it.title, await pdfUrl(it.pdf.id), Number(el.dataset.page)); }
     catch { toast("This PDF could not be opened. Attach it again from the lecture.", "error"); }
   },
-  setLen: el => { view.len = el.dataset.len === "all" ? "all" : Number(el.dataset.len); app.refresh(); },
-  startQuiz: () => {
-    const z = bankOf(view.sel);
-    if (z) startSession(pickSession(z.questions, view.len).map(m => ({ lecture: view.sel, ...m })), false);
+  // the quiz page
+  quizOpen: () => { view.page = "quiz"; app.refresh(); scrollTop(); },
+  quizLecture: () => {
+    view.pick = new Set([view.sel]);
+    view.unfold.add(groupKey(D.items[view.sel]));
+    view.play = null;
+    view.page = "quiz";
+    app.refresh();
+    scrollTop();
   },
+  quizTick: el => { if (el.checked) view.pick.add(el.dataset.id); else view.pick.delete(el.dataset.id); app.refresh(); },
+  quizTickGroup: el => {
+    const g = groups().find(x => x.key === el.dataset.key);
+    if (!g) return;
+    for (const it of g.items) if (el.checked) view.pick.add(it.id); else view.pick.delete(it.id);
+    app.refresh();
+  },
+  quizUnfold: el => {
+    const k = el.dataset.key;
+    if (view.unfold.has(k)) view.unfold.delete(k); else view.unfold.add(k);
+    app.refresh();
+  },
+  quizExam: el => {
+    const ids = new Set(Object.entries(D.modules).filter(([, m]) => m.exam === el.dataset.date).map(([id]) => id));
+    view.pick = new Set(groups().filter(g => ids.has(g.key)).flatMap(g => g.items.map(it => it.id)));
+    app.refresh();
+  },
+  quizClear: () => { view.pick.clear(); app.refresh(); },
+  quizSize: el => { view.size = Number(el.dataset.n) || 10; app.refresh(); },
+  quizLevel: el => { view.level = el.dataset.level; app.refresh(); },
+  quizStart: () => startQuiz(pickedLectures(), view.size, view.level),
+  quizAgain: () => { const p = view.play; if (p) startQuiz(p.lectures.filter(id => D.items[id]?.pdf), p.size, p.level); },
+  quizNew: () => { view.play = null; app.refresh(); },
+  quizCancel: () => { view.prep = null; app.refresh(); }, // what Claude is writing still goes into the banks
   retryMissed: () => {
     const p = activePlay();
     if (!p?.done) return;
     const left = p.missed.filter(m => qOf(m));
-    startSession(shuffled(left.length).map(k => ({ lecture: left[k].lecture, id: left[k].id, order: shuffled(4) })), true, p.module);
+    begin(p.lectures, left.length, p.level, shuffled(left.length).map(k => ({ lecture: left[k].lecture, id: left[k].id, order: shuffled(4) })));
   },
-  // the module quiz
-  nbmOpen: el => { view.mod = el.dataset.mod; app.refresh(); },
-  nbmTick: el => {
-    const off = offSet(view.mod);
-    if (el.checked) off.delete(el.dataset.id); else off.add(el.dataset.id);
-    app.refresh();
-  },
-  nbmAll: () => { offSet(view.mod).clear(); app.refresh(); },
-  nbmNone: () => {
-    const g = groups().find(x => x.key === view.mod);
-    if (g) view.off[g.key] = new Set(splitGroup(g).withQ.map(it => it.id));
-    app.refresh();
-  },
-  nbmLen: el => { view.modLen = el.dataset.len === "all" ? "all" : Number(el.dataset.len); app.refresh(); },
-  nbmStart: startModule,
-  nbmLecture: el => { view.sel = el.dataset.id; view.mod = null; view.tab = "quiz"; app.refresh(); },
   pick: el => choose(Number(el.dataset.k)),
   next,
   quitQuiz: () => { view.play = null; app.refresh(); },
@@ -634,7 +710,7 @@ export const actions = {
     const z = bankOf(id);
     if (!z) return;
     z.questions = z.questions.filter(q => q.id !== qid);
-    // the session that asks it, on screen or not (a module session may be open on another page)
+    // the quiz that asks it, on screen or not
     const p = view.play;
     const k = p ? p.items.findIndex(m => m.lecture === id && m.id === qid) : -1;
     if (p && k !== -1) {
@@ -656,17 +732,22 @@ export const actions = {
   clearBank: async () => {
     const z = bankOf(view.sel);
     if (!z || !await confirmBox("Delete all the questions?",
-      `All ${z.questions.length} questions of this lecture are removed. Your best score and past sessions are kept.`, "Delete all")) return;
+      `All ${z.questions.length} questions of this lecture are removed. Your best score and past quizzes are kept.`, "Delete all")) return;
     z.questions = [];
     if (view.play?.items.some(m => m.lecture === view.sel)) view.play = null;
     view.showBank = false;
     save(); app.refresh();
   },
   markQuizzed: () => {
-    const it = D.items[view.sel];
-    if (!it || it.quizzedAt) return;
-    setStep(it, "quizzed", today());
+    const p = view.play;
+    const ids = p ? [...new Set(p.items.map(m => m.lecture))] : [view.sel];
+    let n = 0;
+    for (const id of ids) {
+      const it = D.items[id];
+      if (it && !it.quizzedAt) { setStep(it, "quizzed", today()); n++; }
+    }
+    if (!n) return;
     save(); app.refresh();
-    toast("Marked as quizzed 🌸");
+    toast(`Marked as quizzed 🌸`);
   },
 };

@@ -431,8 +431,42 @@ i.s-seen { background: var(--s-seen); } i.s-quizzed { background: var(--s-quizze
 .lead { font-size: 16px; }
 
 /* ---- notebook */
-.nb-side { width: 264px; grid-template-columns: minmax(0, 1fr); }
+/* the lecture list stays on screen and scrolls on its own, so a lecture far down needs no scrolling back */
+.nb-side { width: 264px; grid-template-columns: minmax(0, 1fr); align-content: start; max-height: calc(100vh - 150px); overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
 .nb-side .side-item > span { min-width: 0; }
+.nb-quiz { margin-bottom: 6px; background: var(--accent-soft); color: var(--accent-ink); }
+.nb-quiz.on { background: linear-gradient(120deg, #f37ea8, var(--accent)); color: #fff; }
+.nb-quiz .ic { flex: none; }
+.nb-group { width: 100%; border-radius: 10px; cursor: pointer; gap: 8px; justify-content: flex-start; }
+.nb-group:hover { background: var(--surface); color: var(--ink); }
+.nb-group .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--mc); }
+.nb-group-name { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nb-group small { font-weight: 600; letter-spacing: 0; text-transform: none; }
+.nb-chev { width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform .15s; margin-right: 4px; flex: none; }
+.nb-group.open .nb-chev { transform: rotate(45deg); }
+/* the quiz page */
+.nbq { display: grid; gap: 14px; }
+.nbq-h { display: flex; align-items: center; gap: 8px; }
+.nbq-list { display: grid; gap: 8px; }
+.nbq-group { border: 1px solid var(--line); border-radius: 14px; padding: 6px 8px; }
+.nbq-group-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 2px 4px; }
+.nbq-all { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.nbq-all input, .nbq-lecture input { flex: none; width: 18px; height: 18px; accent-color: var(--accent); }
+.nbq-all input.some { opacity: .55; }
+.nbq-all .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--mc); }
+.nbq-lecture { margin: 2px 0 0 18px; cursor: pointer; }
+.nbq-lecture .row-main .t { white-space: normal; line-height: 1.35; }
+.nbq-go { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 6px; border-top: 1px solid var(--line); }
+.nbq-go p { margin: 0; }
+.nbq-preps { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 6px; }
+.nbq-prep { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 12px; background: var(--surface-2); }
+.nbq-prep .nbq-t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.nbq-prep > .nb-spin, .nbq-prep > .ic { flex: none; }
+.nbq-prep small { color: var(--muted); flex: none; }
+.nbq-prep.done .ic { color: var(--ok); }
+.nbq-prep.fail .ic { color: var(--late); }
+.nb-bar { height: 5px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 2px 0 8px; }
+.nb-bar i { display: block; height: 100%; background: linear-gradient(90deg, #f37ea8, var(--accent)); border-radius: inherit; transition: width .25s; }
 input[type="file"] { font-size: 13.5px; color: var(--muted); }
 input[type="file"]::file-selector-button { font: inherit; font-weight: 700; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; margin-right: 10px; cursor: pointer; }
 .nb-main { display: grid; gap: 20px; }

@@ -88,15 +88,24 @@ The updater signing key is in `~/.tauri/bloom.key` (never commit it) and in the 
   It calls the Claude Code CLI installed on her Mac, with her own account, as a hidden background
   process: `ask_claude` in the native shell, `POST /api/ask` of `scripts/preview.mjs` in the
   browser preview. Prompts and answer checking are in `ui/js/notebook-core.js`.
-- A lecture's quiz is a question bank (at most 60), not a fixed set: each question has an `id`, a
-  `level` (recall / understanding / application) and its own history (`seen`, `right`, `lastSeen`,
-  `lastRight`); the quiz also keeps `best` and the last 10 `sessions`. The full shape is at the
-  top of the quiz section of `notebook-core.js`. A session draws a few questions (never asked and
-  missed last time first) and shuffles their options; the stored option order never changes.
+  The PDF's text (page by page) goes straight into the prompt (`ui/js/pdftext-core.js`; `pdf_text` in the
+  shell with PDFKit, cached as `pdfs/<id>.txt`; `POST /api/pdf-text` in the preview); the PDF stays readable
+  for figures, and a thin or missing text leaves the prompt as before. The CLI runs with `--effort low`.
+- A lecture's quiz is a question bank (at most 60): each question has an `id`, a `level` (recall /
+  understanding / application) and its own history (`seen`, `right`, `lastSeen`, `lastRight`,
+  `streak`, `lastQuiz`); the bank keeps `quizzes` (how many quizzes included it), `best` and the
+  last 10 `sessions`. Shape at the top of the quiz section of `notebook-core.js`.
+- A quiz (the Notebook's Quiz page) spans one or more lectures: she picks them (or a whole exam),
+  the number of questions and the difficulty; Bloom has Claude write what is missing first, a few
+  lectures at a time, then draws missed questions, then new ones, then those answered right whose
+  rest is over (3 quizzes of that lecture, then 6, then 12). Logic in `ui/js/quiz-core.js`; the
+  last quizzes are in `D.quizLog`. A retry of the missed ones does not change any history.
 - A notebook entry may also hold `cards` (flashcards, shape at the top of `ui/js/cards-core.js`)
   and `chat` (the Ask tab, `ui/js/chat-core.js`).
 - The Planner asks the assistant once a week for a tickable list of goals, each linked to a
   lecture, recall, deadline or to-do; kept in `D.planner` (shape at the top of `ui/js/planner-core.js`).
+- Backgrounds (`settings.background`): "alternate" (default: meadow and cherry blossoms swap every
+  two hours, `ui/js/background.js`), "nature", "blossom", "plain"; each has a matching sidebar.
 - Assistants: Claude Code first; Codex (OpenAI's CLI, her ChatGPT account) is the backup while
   Claude's usage limit lasts or when Claude is not set up (`ui/js/assistant-core.js`). The native
   shell has the same commands for both (`ask_*`, `*_status`, `*_install`, `*_login`, ...).
