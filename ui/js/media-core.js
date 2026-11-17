@@ -249,12 +249,27 @@ export function needsAutoConnect(current, builtIn) {
 
 /** The built-in connection from the BLOOM_MEDIA secret's JSON, cleaned; null when unusable. */
 export function readBuiltIn(json) {
-  let v;
-  try { v = typeof json === "string" ? JSON.parse(json) : json; } catch { return null; }
+  const v = typeof json === "string" ? looseObject(json) : json;
   const jellyfin = normUrl(v?.jellyfin);
   const user = String(v?.user || "").trim();
   if (!jellyfin || !user) return null;
   return { jellyfin, seerr: v.seerr ? normUrl(v.seerr) : "", user, password: String(v.password || "") };
+}
+
+/**
+ * The secret as typed into GitHub, forgiving what copy and paste does to it: JSON, perhaps wrapped
+ * in quotes or with curly quotes, or one `key: value` / `key=value` per line or comma. null if empty.
+ */
+export function looseObject(text) {
+  let t = String(text || "").trim().replace(/[\u201C\u201D\u2033]/g, '"').replace(/[\u2018\u2019]/g, "'");
+  for (let i = 0; i < 2 && /^(['"`]).*\1$/s.test(t); i++) t = t.slice(1, -1).trim();
+  try { const v = JSON.parse(t); if (v && typeof v === "object") return v; } catch { /* not JSON: try key=value */ }
+  const out = {};
+  for (const part of t.replace(/^\{|\}$/g, "").split(/[\n,;]+/)) {
+    const m = part.match(/^\s*["']?(\w+)["']?\s*[:=]\s*["']?(.*?)["']?\s*$/);
+    if (m && m[2]) out[m[1].toLowerCase()] = m[2];
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 /** A failure in her words. `e.code`: "unreachable", "auth", "seerr-auth" or an HTTP status. */

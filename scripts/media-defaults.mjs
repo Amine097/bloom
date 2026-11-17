@@ -5,13 +5,16 @@
 // Without BLOOM_MEDIA the file is removed and the page asks for the connection instead.
 import { writeFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { readBuiltIn } from "../ui/js/media-core.js";
+import { readBuiltIn, looseObject } from "../ui/js/media-core.js";
 
 const out = fileURLToPath(new URL("../ui/js/media-defaults.js", import.meta.url));
 const raw = process.env.BLOOM_MEDIA || "";
 const conn = raw.trim() ? readBuiltIn(raw) : null;
 if (raw.trim() && !conn) {
-  console.error("BLOOM_MEDIA is set but is not usable JSON with jellyfin and user.");
+  // says what is wrong without printing the value
+  const keys = Object.keys(looseObject(raw) || {});
+  console.error(`BLOOM_MEDIA is set (${raw.trim().length} characters) but cannot be read: ${keys.length ? `found ${keys.join(", ")}; jellyfin and user are needed` : "it is neither JSON nor key=value lines"}.`);
+  console.error('Expected: {"jellyfin":"http://<ip>:8096","seerr":"http://<ip>:5055","user":"<username>"}');
   process.exit(1);
 }
 if (!conn) {

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   normUrl, jellyfinAuth, watchState, libraryCard, filterLibrary, stateCounts, continueList, bySeason,
   jellyfinImage, jellyfinWebUrl, tmdbIndex, mediaStatus, downloadPct, seerrCard, isTitle,
-  requestableSeasons, requestBody, requestRow, seasonsLabel, mediaError, needsAutoConnect, readBuiltIn,
+  requestableSeasons, requestBody, requestRow, seasonsLabel, mediaError, needsAutoConnect, readBuiltIn, looseObject,
 } from "../ui/js/media-core.js";
 
 test("normUrl: adds http, drops the trailing slash and Jellyfin's /web path", () => {
@@ -175,4 +175,13 @@ test("needsAutoConnect: only when she has none, or hers came from an older built
   assert.equal(needsAutoConnect(mine, built), false);
   assert.equal(needsAutoConnect({ ...mine, jellyfin: "http://old:8096" }, built), true);
   assert.equal(needsAutoConnect({ ...mine, auto: false, jellyfin: "http://other:8096" }, built), false); // set by hand
+});
+
+test("readBuiltIn forgives what copy and paste does to the secret", () => {
+  const want = { jellyfin: "http://10.0.0.1:8096", seerr: "http://10.0.0.1:5055", user: "her", password: "" };
+  assert.deepEqual(readBuiltIn(`'{"jellyfin":"http://10.0.0.1:8096","seerr":"http://10.0.0.1:5055","user":"her"}'`), want);
+  assert.deepEqual(readBuiltIn("{\u201Cjellyfin\u201D:\u201Chttp://10.0.0.1:8096\u201D,\u201Cseerr\u201D:\u201Chttp://10.0.0.1:5055\u201D,\u201Cuser\u201D:\u201Cher\u201D}"), want);
+  assert.deepEqual(readBuiltIn("jellyfin=http://10.0.0.1:8096\nseerr=http://10.0.0.1:5055\nuser=her"), want);
+  assert.deepEqual(readBuiltIn("{jellyfin: http://10.0.0.1:8096, seerr: http://10.0.0.1:5055, user: her}"), want);
+  assert.equal(looseObject("   "), null);
 });
