@@ -57,3 +57,9 @@ test("a YYYYMMDD in the file name is its date", () => {
   assert.equal(dateFromFile("Proteomics_2026.pdf"), null);
   assert.equal(dateFromFile("x 20261399.pdf"), null);
 });
+
+test("replacedLectures lists the lectures a batch would take a PDF from, once each", () => {
+  const items = { a: { pdf: { id: "p1" } }, b: { pdf: null }, c: { pdf: { id: "p2" } } };
+  assert.deepEqual(mod.replacedLectures(["a", "b", "", "new:m1", "a", "c", "gone"], items), ["a", "c"]);
+  assert.deepEqual(mod.replacedLectures([], items), []);
+});

@@ -1,6 +1,7 @@
 // Notebook logic that does not touch the screen: the prompts sent to Claude Code, and the
 // parsers that turn its answers into study guides and quizzes. Pure, covered by tests/.
 import { themesBlock, cleanThemes } from "./themes-core.js";
+import { myNotesBlock } from "./mynotes-core.js";
 
 /** The command line, shared by the dev preview server. The native shell (lib.rs) uses the same flags. */
 export const CLAUDE_ARGS = ["-p", "--output-format", "json", "--no-session-persistence", "--strict-mcp-config", "--allowedTools", "Read", "--max-turns", "8", "--effort", "low"];
@@ -84,8 +85,11 @@ const LEVEL_TEXT = {
  * questions already in the bank, which Claude must not repeat. `schemas`: about half of the
  * questions are built on the figures (see LOOK_LINE). `themes`: the theme keys she ticked
  * (themes-core.js); Claude writes only on those and tags every question. null: no themes asked.
+ * `myNotes`: her notes and marks on the PDF ("Use my notes", notesPages of mynotes-core.js); absent
+ * or empty leaves the prompt as without them.
  */
-export function quizPrompt(title, { count = 10, level = "mixed", avoid = [], schemas = false, themes = null } = {}) {
+export function quizPrompt(title, { count = 10, level = "mixed", avoid = [], schemas = false, themes = null, myNotes = null } = {}) {
+  const mine = myNotesBlock(myNotes, { what: "question", themes: Array.isArray(themes) });
   const mix = LEVELS.includes(level)
     ? `Every question is at the "${level}" level.`
     : "Mix the three levels, roughly a third each.";
@@ -114,7 +118,9 @@ Every question:
 "answer" is the index (0 to 3) of the correct option; vary its position across questions.
 "level" is "recall", "understanding" or "application".
 "why" explains in one or two sentences why the correct option is right. "page" is the page the answer comes from.
-${figures}${Array.isArray(themes) ? `
+${figures}${mine ? `
+${mine}
+` : ""}${Array.isArray(themes) ? `
 ${themesBlock(themes, "question")}
 ` : ""}${known ? `
 The student already has the questions below. Write new questions about other facts and ideas of the document; do not repeat or reword any of these:

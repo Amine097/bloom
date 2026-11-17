@@ -6,6 +6,7 @@ import { askAboutPdf, askAssistant, assistantStatus } from "../assistant.js";
 import { ficheText } from "../fiche-run.js";
 import { pagesOf } from "../pdftext-core.js";
 import { ficheWindow, ficheQuizPrompt } from "../fiches-core.js";
+import { notesPages, notesStats, notesSummary, hasNotes, myNotesBlock, withMyNotes } from "../mynotes-core.js";
 import { srcFiche, ficheIdOf } from "../sources.js";
 import { extractJson } from "../notebook-core.js";
 import {
@@ -44,6 +45,35 @@ export function schemasToggle({ hint = true } = {}) {
   return `<span class="nb-schemas">
       <span class="nb-seg" role="group" aria-label="How the slides are read" title="${line}">${seg(false, "Standard")}${seg(true, "With schemas")}</span>
       ${hint ? `<small class="nb-seg-hint">${line}</small>` : ""}
+    </span>`;
+}
+
+// ---- "Use my notes": her notes and marks on the slides as extra material (mynotes-core.js)
+
+/** Her choice, remembered in D.settings.useNotes (absent = off, so no migration is needed). */
+export const usingNotes = () => D.settings?.useNotes === true;
+export function setUseNotes(on) {
+  D.settings.useNotes = Boolean(on);
+  save();
+}
+
+/** Her notes and marks on source `src`, page by page, for a prompt; null when the switch (`on`) is off. */
+export const myNotesFor = (src, on = usingNotes()) => (on ? notesPages(D.slideNotes?.[src], D.pdfMarks?.[src]) : null);
+
+/**
+ * The "Use my notes" switch, beside "Standard | With schemas" wherever quiz questions or flashcards
+ * are written, with how much she wrote on the sources `srcs` (the lecture, or the ticked lectures
+ * and fiches). The action "nbNotes" (notebook.js) flips it. With nothing written yet it looks
+ * quieter but still works.
+ */
+export function notesToggle(srcs) {
+  const on = usingNotes();
+  const stats = notesStats(D.slideNotes, D.pdfMarks, srcs);
+  const some = hasNotes(stats);
+  const what = "Claude also gets your notes, highlights and text boxes on the slides, gives more weight to what you marked, and may ask about what your notes add";
+  return `<span class="nb-mine ${some ? "" : "quiet"}">
+      <span class="nb-seg"><button type="button" class="nb-seg-b nb-mine-b ${on ? "on" : ""}" role="switch" aria-checked="${on}" data-act="nbNotes" title="${esc(what)}"><i class="nb-knob" aria-hidden="true"></i>Use my notes</button></span>
+      <small class="nb-seg-hint">${esc(notesSummary(stats))}</small>
     </span>`;
 }
 
@@ -167,9 +197,10 @@ export async function runJob(id, kind, prompt, done, { schemas = false } = {}) {
  * runJob for a fiche (source "fiche:<id>"): `prompt` is a Notebook quiz prompt. The fiche's text
  * replaces its PDF, one window of pages at a time (ficheWindow); the next run takes the pages after
  * them (the bank's `cursor`). An uploaded fiche whose text cannot be extracted (a scanned PDF) is
- * read by the assistant itself, like a lecture. `done(text, fiche)` as in runJob.
+ * read by the assistant itself, like a lecture. `done(text, fiche)` as in runJob. `myNotes`: her notes
+ * and marks on the fiche ("Use my notes", myNotesFor), given for the pages of the window only.
  */
-export async function runFicheJob(src, kind, prompt, done) {
+export async function runFicheJob(src, kind, prompt, done, { myNotes = null } = {}) {
   const f = srcFiche(src);
   if (!f) return false;
   return track(`${src}:${kind}`, false, async () => {
@@ -179,9 +210,10 @@ export async function runFicheJob(src, kind, prompt, done) {
     if (chars >= 300) {
       win = ficheWindow(pages, f.quiz?.cursor || 1);
       const part = pages.filter(p => p.n >= win.from && p.n <= win.to);
-      text = await askAssistant(ficheQuizPrompt(prompt, f.title, part, pages.at(-1).n));
+      text = await askAssistant(ficheQuizPrompt(prompt, f.title, part, pages.at(-1).n, myNotes));
     } else if (f.source === "uploaded" && f.pdf) {
-      text = await askAboutPdf(f.pdf.id, prompt);
+      const mine = myNotesBlock(myNotes, { what: "question", themes: prompt.includes('"themes": [') });
+      text = await askAboutPdf(f.pdf.id, withMyNotes(prompt, mine));
     } else {
       throw new Error(`"${f.title}" has no text Bloom can read yet.`);
     }

@@ -93,3 +93,10 @@ export function dateFromFile(name) {
   if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
   return `${m[1]}-${m[2]}-${m[3]}`;
 }
+
+/**
+ * The lectures whose PDF a batch replaces: the chosen targets (lecture ids, "new:…" for new
+ * lectures, "" for skipped files) that already have a PDF, once each. `items` is D.items.
+ */
+export const replacedLectures = (targets, items) =>
+  [...new Set(targets)].filter(id => id && !id.startsWith("new:") && items?.[id]?.pdf);

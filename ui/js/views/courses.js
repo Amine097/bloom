@@ -4,7 +4,8 @@ import { today, fmtDay, fmtWday, weekLabel, relDay, weekOf } from "../dates.js";
 import { stateOf, setStep, LABEL } from "../recall.js";
 import { esc, icon, app, openModal, openViewer, confirmBox, field, input, select, cvar, toast, COLORS } from "../ui.js";
 import { storePdf, pdfUrl, removePdf, fmtSize, SLIDES, FILE_ACCEPT } from "../files.js";
-import { matchFiles, titleFromFile, dateFromFile } from "../attach-core.js";
+import { matchFiles, titleFromFile, dateFromFile, replacedLectures } from "../attach-core.js";
+import { confirmReplace, forgetAnnotations } from "../pdf-export.js";
 import { LECTURE_FILES } from "../seed.js";
 import { noteCount } from "../slidenotes-core.js";
 
@@ -151,13 +152,17 @@ function openEditor(id) {
       if (!await confirmBox("Delete this?", `"${it.title}" and its progress will be removed.`)) return;
       delete D.items[id];
       delete D.notebook[id];
-      delete D.slideNotes?.[id];
+      forgetAnnotations(id);
       save(); app.refresh();
       if (it.pdf) removePdf(it.pdf.id);
     } },
     onSubmit: async (v, form) => {
       let pdf = null;
-      if (v.pdfFile?.size && v.kind === "lecture") {
+      const newFile = Boolean(v.pdfFile?.size && v.kind === "lecture");
+      // her notes and marks on the old PDF: exported first if she wants, else lost (the editor closes)
+      if (id && D.items[id]?.pdf && (newFile || v.pdfRemove)
+        && await confirmReplace([id], { removing: !newFile }) !== "replace") return;
+      if (newFile) {
         const button = form.querySelector('[type="submit"]');
         button.disabled = true;
         if (SLIDES.test(v.pdfFile.name)) toast("Turning the slides into a PDF…");
@@ -171,7 +176,10 @@ function openEditor(id) {
       else if (v.pdfRemove) target.pdf = null;
       if (oldPdf && target.pdf !== oldPdf) {
         removePdf(oldPdf.id);
-        if (id) delete D.notebook[id]; // its study guide and quiz were written from the old PDF
+        if (id) {
+          delete D.notebook[id]; // its study guide and quiz were written from the old PDF
+          forgetAnnotations(id); // as were her notes and marks
+        }
       }
       Object.assign(target, {
         title: v.title.trim(), kind: v.kind, module: v.module || null,
@@ -250,6 +258,8 @@ function openBulk(files) {
         return false;
       }
       if (!pairs.length) return;
+      // lectures that lose their PDF, with her notes and marks on it: one question for all of them
+      if (await confirmReplace(replacedLectures(pairs.map(([, to]) => to), D.items)) !== "replace") return;
       const button = form.querySelector('[type="submit"]');
       button.disabled = true;
       let newModId = null;
@@ -284,7 +294,7 @@ function openBulk(files) {
         if (!it) { removePdf(pdf.id); continue; }
         const old = it.pdf;
         it.pdf = pdf;
-        if (old) { removePdf(old.id); delete D.notebook[to]; } // its study guide and quiz came from the old PDF
+        if (old) { removePdf(old.id); delete D.notebook[to]; forgetAnnotations(to); } // all made on the old PDF
         attached++;
       }
       save(); app.refresh();
@@ -343,12 +353,14 @@ export const actions = {
   attachPdf: async el => {
     const file = el.files[0];
     if (!file) return;
+    if (await confirmReplace([el.dataset.id]) !== "replace") { el.value = ""; return; }
     if (SLIDES.test(file.name)) toast("Turning the slides into a PDF…");
     let pdf;
     try { pdf = await storePdf(file); }
     catch (e) { toast(e.message, "error"); el.value = ""; return; }
     const it = D.items[el.dataset.id];
     if (!it) { removePdf(pdf.id); return; }
+    if (it.pdf) { removePdf(it.pdf.id); delete D.notebook[el.dataset.id]; forgetAnnotations(el.dataset.id); }
     it.pdf = pdf;
     save(); app.refresh();
     toast("PDF attached 📎");

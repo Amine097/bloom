@@ -520,6 +520,16 @@ input[type="file"]::file-selector-button { font: inherit; font-weight: 700; colo
 .nbq-mode { align-items: flex-start; }
 .nbq-mode > .small { padding-top: 8px; }
 .card-h .nb-schemas { margin-right: 4px; }
+/* "Use my notes": a one-button switch in the same pill, with how much she wrote under it */
+.nb-mine { display: inline-grid; justify-items: center; align-content: start; gap: 3px; }
+.toolbar .nb-mine { justify-items: start; }
+.nb-mine-b { display: inline-flex; align-items: center; gap: 8px; padding-left: 7px; }
+.nb-knob { position: relative; width: 26px; height: 15px; border-radius: 99px; background: var(--line); flex: none; transition: background .15s; }
+.nb-knob::after { content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s; }
+.nb-mine-b.on .nb-knob { background: var(--accent); }
+.nb-mine-b.on .nb-knob::after { transform: translateX(11px); background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .2); }
+.nb-mine.quiet .nb-mine-b:not(.on) { opacity: .7; }
+.nb-mine.quiet .nb-seg-hint { font-style: italic; opacity: .85; }
 /* themes: the chips she ticks (quiz and flashcards share them) and the small tags on a question or card */
 .nb-themes-row { margin: 4px 0 0; align-items: flex-start; flex-wrap: nowrap; }
 .nb-themes-row > .small { padding-top: 5px; flex: none; }
@@ -559,7 +569,7 @@ input[type="file"]::file-selector-button { font: inherit; font-weight: 700; colo
 .modal.wide { width: min(760px, 100%); }
 .modal header { display: flex; align-items: center; justify-content: space-between; padding: 18px 16px 8px 22px; }
 .modal-b { padding: 8px 22px 14px; display: grid; gap: 13px; overflow-y: auto; }
-.modal footer { display: flex; gap: 10px; padding: 12px 22px 20px; }
+.modal footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; padding: 12px 22px 20px; }
 .page-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .page-actions label.btn { cursor: pointer; }
 .bulk { display: grid; gap: 2px; }
@@ -631,10 +641,59 @@ input[type="file"]::file-selector-button { font: inherit; font-weight: 700; colo
 .pv-item.on .pv-ipage { background: var(--surface); }
 .pv-itext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pv-empty { font-size: 13px; color: var(--muted); }
+/* annotations (viewer-marks.js): the toolbar, then the layers over each page */
+.pv-tools { display: flex; align-items: center; gap: 6px; flex: none; }
+.pv-tgroup, .pv-opts { display: flex; align-items: center; gap: 2px; padding: 2px; border-radius: 12px; background: var(--surface-2); }
+.pv-opts { gap: 3px; padding: 2px 6px; }
+.pv-opts[hidden] { display: none; }
+.pv-tool { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; color: var(--muted); transition: background .15s, color .15s; }
+.pv-tool:hover:not(:disabled) { color: var(--accent-ink); background: var(--surface); }
+.pv-tool[aria-pressed="true"] { background: var(--surface); color: var(--accent-ink); box-shadow: 0 1px 3px rgba(60, 20, 45, .14); }
+.pv-tool:disabled { opacity: .38; cursor: default; }
+.pv-tool.busy { cursor: progress; animation: pv-busy 1s ease-in-out infinite alternate; }
+@keyframes pv-busy { to { opacity: .35; } }
+.pv-sw { width: 20px; height: 20px; border-radius: 50%; background: var(--sw); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12); transition: transform .12s; }
+.pv-sw:hover { transform: scale(1.12); }
+.pv-sw[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--surface-2), 0 0 0 4px var(--ring, var(--sw)); }
+.pv-sep { width: 1px; height: 18px; margin: 0 3px; background: var(--line); }
+.pv-wd { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); }
+.pv-wd[aria-pressed="true"] { background: var(--surface); color: var(--ink); }
+.pv-pop { position: relative; display: grid; }
+.pv-confirm { position: absolute; top: calc(100% + 8px); right: -6px; z-index: 6; width: 250px; padding: 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); box-shadow: 0 14px 34px rgba(60, 20, 45, .22); font-size: 13.5px; }
+.pv-confirm div { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
+.pv-confirm .btn { padding: 6px 12px; font-size: 13px; }
+.pv-hl, .pv-ink { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; overflow: visible; }
+.pv-hl { mix-blend-mode: multiply; }
+.pv-ink path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.pv-hl path.hot, .pv-ink path.hot { opacity: .35; }
+.pv-boxes { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; }
+.pv-tbox { position: absolute; padding: .3em; line-height: 1.25; white-space: pre; font-family: Helvetica, Arial, sans-serif; font-weight: 400; background: rgba(255, 255, 255, .82); border-radius: .25em; pointer-events: none; }
+.pv-ttext { display: block; min-width: .6em; min-height: 1.25em; outline: 0; -webkit-user-select: text; user-select: text; }
+.pv-tdel { display: none; position: absolute; top: -9px; right: -9px; width: 18px; height: 18px; place-items: center; border-radius: 50%; background: var(--ink); color: var(--surface); box-shadow: 0 1px 4px rgba(0, 0, 0, .25); }
+.pv[data-ink-tool="text"] .pv-tbox, .pv[data-ink-tool="eraser"] .pv-tbox { pointer-events: auto; }
+.pv[data-ink-tool="text"] .pv-tbox { cursor: move; box-shadow: 0 0 0 1px rgba(60, 20, 45, .16); }
+.pv[data-ink-tool="text"] .pv-tbox:hover { box-shadow: 0 0 0 1.5px var(--accent); }
+.pv[data-ink-tool="text"] .pv-tbox:hover .pv-tdel { display: grid; }
+.pv-tbox.editing { cursor: text; box-shadow: 0 0 0 2px var(--accent) !important; }
+.pv-tbox.editing .pv-tdel, .pv-tbox.dragging .pv-tdel { display: none !important; }
+.pv-tbox.dragging { opacity: .85; box-shadow: 0 4px 14px rgba(60, 20, 45, .25) !important; }
+.pv-tbox.hot { opacity: .35; }
+.pv[data-ink-tool="pen"] .pv-page, .pv[data-ink-tool="eraser"] .pv-page, .pv[data-ink-tool="text"] .pv-page { touch-action: none; -webkit-user-select: none; user-select: none; }
+.pv[data-ink-tool="pen"] .textLayer, .pv[data-ink-tool="eraser"] .textLayer, .pv[data-ink-tool="text"] .textLayer { pointer-events: none; }
+.pv[data-ink-tool="pen"] .pv-page { cursor: crosshair; }
+.pv[data-ink-tool="text"] .pv-page { cursor: text; }
+.pv[data-ink-tool="eraser"] .pv-page { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Ccircle cx='10' cy='10' r='7' fill='white' fill-opacity='.7' stroke='%23c93a70' stroke-width='1.6'/%3E%3C/svg%3E") 10 10, cell; }
+.pv[data-ink-tool="highlight"] .textLayer ::selection { background: var(--hl-sel, rgba(255, 216, 77, .55)); }
+:root[data-theme="dark"] .pv-tool[aria-pressed="true"] { box-shadow: 0 1px 3px rgba(0, 0, 0, .4); }
+:root[data-theme="dark"] .pv-sw { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .28); }
+:root[data-theme="dark"] .pv-sw[data-color="ink"] { --ring: #cdbfd2; }
+:root[data-theme="dark"] .pv-sw[aria-pressed="true"] { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .28), 0 0 0 2px var(--surface-2), 0 0 0 4px var(--ring, var(--sw)); }
+:root[data-theme="dark"] .pv-confirm { box-shadow: 0 14px 34px rgba(0, 0, 0, .5); }
 :root[data-theme="dark"] .pv-scroll { background: #170f16; }
 :root[data-theme="dark"] .pv-page { box-shadow: 0 6px 18px rgba(0, 0, 0, .45); }
 :root[data-theme="dark"] .pv-mark { box-shadow: 0 0 0 3px rgba(41, 27, 39, .9), 0 2px 6px rgba(0, 0, 0, .4); }
 @media (max-width: 1000px) { .pv-notes { width: 250px; } .pv-title { display: none; } .pv-bar { padding-left: 12px; } .pv-bar::before { content: ""; flex: 1; } }
+@media (max-width: 960px) { .pv-bar { flex-wrap: wrap; row-gap: 6px; } .pv-tools { order: 5; width: 100%; justify-content: center; } }
 
 #toast { position: fixed; left: 50%; bottom: 26px; transform: translate(-50%, 20px); background: var(--ink); color: var(--bg); padding: 10px 18px; border-radius: 99px; font-weight: 600; font-size: 14px; opacity: 0; pointer-events: none; transition: .25s; z-index: 20; max-width: 80vw; }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }

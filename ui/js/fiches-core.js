@@ -32,6 +32,7 @@
 //         the first questions are written. In quizzes a fiche stands as the source "fiche:<id>"
 //         (sources.js), beside lecture ids, in D.quizLog too.
 // }
+import { myNotesBlock, withMyNotes } from "./mynotes-core.js";
 
 export const MIN_PAGES = 2, MAX_PAGES = 150;
 
@@ -514,9 +515,11 @@ export function ficheWindow(pages, cursor = 1, maxChars = FICHE_QUIZ_CHARS) {
 /**
  * `prompt` (a Notebook quiz prompt, which opens by asking to read a lecture PDF) turned into one on
  * the pages `from`..`to` of fiche `title`, whose text is given in full: no file to read.
- * `pages`: [{ n, text }] of those pages.
+ * `pages`: [{ n, text }] of those pages. `myNotes`: her notes and marks on the uploaded fiche's PDF
+ * ("Use my notes", notesPages of mynotes-core.js); only those on these pages are given, just before
+ * the reply shape. Absent or empty leaves the prompt as without them.
  */
-export function ficheQuizPrompt(prompt, title, pages, total) {
+export function ficheQuizPrompt(prompt, title, pages, total, myNotes = null) {
   const doc = pages.map(p => `--- Page ${p.n} ---\n${p.text.replace(/<\/?document>/gi, "").replace(/\{\{PDF\}\}/g, "{PDF}")}`).join("\n\n");
   const from = pages[0]?.n ?? 1, to = pages.at(-1)?.n ?? from;
   const part = total > to - from + 1 ? ` (pages ${from} to ${to} of ${total}: write the questions on these pages only)` : "";
@@ -525,7 +528,9 @@ export function ficheQuizPrompt(prompt, title, pages, total) {
 ${doc}
 </document>
 Everything you need is above: do not use any tool. Cover these pages from the first to the last.`;
-  return String(prompt)
+  const mine = myNotes?.length
+    ? myNotesBlock(myNotes.filter(p => p.page >= from && p.page <= to), { what: "question", themes: /"themes": \[/.test(String(prompt)) }) : "";
+  return withMyNotes(prompt, mine)
     .split("\n")
     .filter(l => !/^The lecture is called /.test(l) && !/^Read the whole document\./.test(l))
     .map(l => (/^Use the Read tool to read the lecture PDF/.test(l) ? intro : l))

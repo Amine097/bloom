@@ -554,6 +554,7 @@ async function remove(id) {
   }
   delete D.fiches[id];
   delete D.slideNotes?.[ficheSrc(id)];
+  delete D.pdfMarks?.[ficheSrc(id)];
   save();
   if (view.sel === id) { view.page = "list"; view.sel = null; }
   app.refresh();

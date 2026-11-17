@@ -1,13 +1,15 @@
 // Bloom's own PDF viewer, opened by openViewer in ui.js: pdf.js draws the pages lazily as she
 // scrolls (ui/vendor/pdfjs, version 3.3.122, the legacy build: the last one whose build targets
 // Safari 14, i.e. the WKWebView of macOS 11), with a text layer to select and copy, zoom, a page
-// counter and, when the PDF has a quiz source, her notes per slide (D.slideNotes, slidenotes-core.js).
+// counter and, when the PDF has a quiz source, her notes per slide (D.slideNotes, slidenotes-core.js)
+// and her annotations drawn over the pages (D.pdfMarks, viewer-marks.js).
 import { D, save } from "./store.js";
 import { today } from "./dates.js";
 import { esc, icon, app } from "./ui.js";
 import { urlBytes, releaseUrl } from "./files.js";
 import { isFicheSrc } from "./sources.js";
 import { noteText, noteList, setNote, mostVisible, clampPage } from "./slidenotes-core.js";
+import { inkBar, inkSetup, inkPages, inkRepaint, inkClose } from "./viewer-marks.js";
 
 const PX = 96 / 72;           // CSS pixels per PDF point at 100 %
 const PAD = 22;               // space around the pages, in CSS pixels
@@ -33,7 +35,7 @@ let V = null;         // the open viewer
 export function show(host, { title, url, page = null, notes = null }) {
   close();
   const v = V = {
-    host, url, src: notes || null, zoom: "fit", k: 1, pages: [], cur: clampPage(page, Infinity, 1),
+    host, url, title, src: notes || null, zoom: "fit", k: 1, pages: [], cur: clampPage(page, Infinity, 1),
     near: new Set(), busy: false, closed: false, forced: null, saveTimer: 0, frame: 0, doc: null, cleanup: [],
   };
   host.innerHTML = `
@@ -50,6 +52,7 @@ export function show(host, { title, url, page = null, notes = null }) {
           <button type="button" class="pv-pct" data-pv="fit" title="Fit to the width">Fit</button>
           <button type="button" class="iconbtn" data-pv="in" title="Zoom in" aria-label="Zoom in">${icon("plus")}</button>
         </div>
+        ${inkBar(v)}
         ${v.src ? `<button type="button" class="pv-ntoggle" data-pv="notes" aria-pressed="${notesOpen}" title="Your notes on these slides">${icon("note", 16)} Notes<span data-pv="ncount"></span></button>` : ""}
         <button type="button" class="iconbtn" data-viewer="close" aria-label="Close" title="Close (Esc)">${icon("close")}</button>
       </header>
@@ -70,6 +73,7 @@ export function show(host, { title, url, page = null, notes = null }) {
   v.input = host.querySelector('[data-pv="page"]');
   v.note = host.querySelector('[data-pv="note"]');
   wire(v);
+  inkSetup(v);
   v.scroll.focus({ preventScroll: true });
   if (v.src) { showNote(v); drawList(v); }
   load(v).catch(e => {
@@ -85,6 +89,7 @@ export function close() {
   if (!v) return;
   V = null;
   v.closed = true;
+  inkClose(v);
   if (v.saveTimer) { clearTimeout(v.saveTimer); save(); }
   cancelAnimationFrame(v.frame);
   for (const off of v.cleanup) off();
@@ -108,6 +113,7 @@ async function load(v) {
     `<div class="pv-page" data-page="${i + 1}" aria-label="Page ${i + 1}"><i class="pv-mark" title="This slide has a note"></i></div>`).join("");
   v.pages = [...v.pagesEl.children].map(el => ({ el, w: first.width, h: first.height, canvas: null, drawn: 0, task: null, text: false }));
   v.cur = clampPage(v.cur, n);
+  inkPages(v);
   marks(v);
   layout(v, false);
   go(v, v.cur);
@@ -122,7 +128,7 @@ async function load(v) {
     const p = v.pages[i], s = sizes[i];
     if (Math.abs(p.w - s.width) > 0.5 || Math.abs(p.h - s.height) > 0.5) { p.w = s.width; p.h = s.height; p.drawn = 0; moved = true; }
   }
-  if (moved) layout(v);
+  if (moved) { layout(v); inkRepaint(v); }
 }
 
 // ---- sizes and position
@@ -295,7 +301,7 @@ function step(v, dir) {
 function wire(v) {
   const onKey = e => {
     if (V !== v || e.metaKey && !["=", "+", "-", "0"].includes(e.key) || e.ctrlKey || e.altKey) return;
-    const typing = e.target.closest?.("input, textarea, select");
+    const typing = e.target.closest?.("input, textarea, select, [contenteditable]");
     if (typing) {
       if (e.target === v.input && e.key === "Enter") { e.preventDefault(); go(v, clampPage(v.input.value, v.pages.length, v.cur)); v.input.blur(); }
       return;

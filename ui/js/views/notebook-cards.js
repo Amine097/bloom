@@ -5,7 +5,7 @@ import { D, save, uid } from "../store.js";
 import { today, relDay } from "../dates.js";
 import { esc, icon, app, confirmBox, toast, select } from "../ui.js";
 import {
-  runJob, isRunning, isRunningWithSchemas, withSchemas, schemasToggle, takesAbout, themeChips, themeTags, checkedThemes, sortByTheme, isSorting,
+  runJob, isRunning, isRunningWithSchemas, withSchemas, schemasToggle, notesToggle, myNotesFor, takesAbout, themeChips, themeTags, checkedThemes, sortByTheme, isSorting,
 } from "./notebook-jobs.js";
 import { matchesThemes, unclassified } from "../themes-core.js";
 import {
@@ -57,7 +57,7 @@ function genControls(label, room, themes = false) {
   const asked = Math.min(view.genCount, room);
   return `<div class="toolbar nb-gen">
       ${select("count", GEN_COUNTS.map(n => [n, `${n} cards`]), view.genCount, 'class="pill-select" data-change="cardGenCount" aria-label="How many cards"')}
-      ${schemasToggle()}
+      ${schemasToggle()}${notesToggle([current])}
       <button class="btn primary" data-act="cardGenerate">${icon("spark", 16)} ${label}</button>
     </div>${themes ? themesRow() : ""}
     ${asked < view.genCount ? `<p class="small muted">The deck has room for ${room} more, so Claude writes ${asked}.</p>` : ""}`;
@@ -216,7 +216,7 @@ function generate(id) {
   const n = deck?.cards.length ?? 0;
   if (n >= DECK_MAX) { toast("The deck is full. Delete some cards first.", "error"); return; }
   const schemas = withSchemas();
-  const prompt = cardsPrompt(it.title, { count: Math.min(view.genCount, DECK_MAX - n), avoid: (deck?.cards ?? []).map(x => x.front), schemas, themes: checkedThemes() });
+  const prompt = cardsPrompt(it.title, { count: Math.min(view.genCount, DECK_MAX - n), avoid: (deck?.cards ?? []).map(x => x.front), schemas, themes: checkedThemes(), myNotes: myNotesFor(id) });
   runJob(id, KIND, prompt, (text, now) => store(id, parseCards(text), now.title), { schemas });
 }
 

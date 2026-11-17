@@ -55,7 +55,11 @@ function migrate(data) {
   // and flashcards may carry `themes` (keys of THEMES in ui/js/themes-core.js); absent means not
   // yet classified. Nothing to convert.
   data.slideNotes ??= {};
-  data.version = 7;
+  // v8: D.pdfMarks holds her annotations drawn on PDFs (highlights, pen strokes, text boxes), by
+  // quiz source then PDF page like D.slideNotes: { [src]: { [page]: [mark] } }; mark shape at the
+  // top of ui/js/marks-core.js. Nothing to convert.
+  data.pdfMarks ??= {};
+  data.version = 8;
   return data;
 }
 

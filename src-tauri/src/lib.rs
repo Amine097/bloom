@@ -1,7 +1,8 @@
 //! Native shell for Bloom. The interface (ui/) does all the work; this side only owns the data
-//! file (load, atomic save, one backup per day, export to the Downloads folder), the lecture
-//! PDFs stored beside it in `pdfs/`, turning slides into PDFs with Keynote, and running the
-//! assistants' CLIs: Claude Code, and Codex as its backup (install, sign-in, asking).
+//! file (load, atomic save, one backup per day, export to the Downloads folder, where annotated
+//! PDFs are saved too), the lecture PDFs stored beside it in `pdfs/`, turning slides into PDFs
+//! with Keynote, and running the assistants' CLIs: Claude Code, and Codex as its backup (install,
+//! sign-in, asking).
 
 use std::fs;
 use std::io::{Read, Write};
@@ -84,6 +85,75 @@ fn export_data(app: AppHandle, text: String, day: String) -> Result<String, Stri
     let dir = app.path().download_dir().map_err(|e| e.to_string())?;
     let file = dir.join(format!("Bloom-backup-{day}.json"));
     fs::write(&file, text).map_err(|e| e.to_string())?;
+    Ok(file.to_string_lossy().into_owned())
+}
+
+/// Undoes the percent-encoding of `encodeURIComponent` (header values must be plain ASCII).
+fn percent_decode(text: &str) -> String {
+    let raw = text.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(raw.len());
+    let mut i = 0;
+    while i < raw.len() {
+        if raw[i] == b'%' && i + 2 < raw.len() {
+            let byte = std::str::from_utf8(&raw[i + 1..i + 3])
+                .ok()
+                .and_then(|hex| u8::from_str_radix(hex, 16).ok());
+            if let Some(b) = byte {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(raw[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// A file name that stays inside the folder it is written to, ending in `.pdf`.
+fn pdf_file_name(name: &str) -> String {
+    let clean: String = name
+        .chars()
+        .map(|c| if c == '/' || c == '\\' || c == ':' || c.is_control() { ' ' } else { c })
+        .collect();
+    let clean: String = clean.trim().trim_start_matches('.').trim().chars().take(200).collect();
+    if clean.is_empty() {
+        return "Annotated.pdf".into();
+    }
+    if clean.to_ascii_lowercase().ends_with(".pdf") {
+        clean
+    } else {
+        format!("{clean}.pdf")
+    }
+}
+
+/// Writes a PDF she exported (an annotated copy of a lecture PDF) to the Downloads folder and
+/// returns its path. The bytes are the raw request body; the name is in the `x-file-name` header,
+/// percent-encoded. A file already there is never replaced: "name 2.pdf", "name 3.pdf"…
+#[tauri::command]
+fn save_download(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected the file bytes".into());
+    };
+    let encoded = request
+        .headers()
+        .get("x-file-name")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| "missing file name".to_string())?;
+    let head = &bytes[..bytes.len().min(1024)];
+    if !head.windows(5).any(|w| w == b"%PDF-") {
+        return Err("not a PDF".into());
+    }
+    let name = pdf_file_name(&percent_decode(encoded));
+    let stem = name[..name.len() - 4].to_string();
+    let dir = app.path().download_dir().map_err(|e| e.to_string())?;
+    let mut file = dir.join(&name);
+    let mut n = 2;
+    while file.exists() {
+        file = dir.join(format!("{stem} {n}.pdf"));
+        n += 1;
+    }
+    fs::write(&file, bytes).map_err(|e| e.to_string())?;
     Ok(file.to_string_lossy().into_owned())
 }
 
@@ -1619,6 +1689,7 @@ pub fn run() {
             load_data,
             save_data,
             export_data,
+            save_download,
             save_pdf,
             read_pdf,
             delete_pdf,

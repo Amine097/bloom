@@ -134,8 +134,20 @@ The updater signing key is in `~/.tauri/bloom.key` (never commit it) and in the 
   read through `files.js` (`urlBytes`), as the CSP blocks `fetch` on blob URLs.
 - Notes per slide: `D.slideNotes[src][page] = { text, at }` (v7), `src` being the quiz source (lecture
   id or `"fiche:<id>"`); logic in `ui/js/slidenotes-core.js`. The viewer's panel saves as she types;
-  clearing the text deletes the note. Deleting a lecture or fiche deletes its notes; replacing the PDF
-  keeps them. Nothing else reads them.
+  clearing the text deletes the note. Deleting a lecture or fiche, or replacing its PDF, deletes its
+  notes (after the export offer below). Read by the export and by "Use my notes".
+- Annotations (v8): `D.pdfMarks[src][page] = [mark]` (highlight, pen, text box; shape at the top of
+  `ui/js/marks-core.js`), drawn and edited by the viewer's toolbar (`ui/js/viewer-marks.js`), with undo
+  and "Clear this page". Marks never change the PDF file.
+- "Export annotated PDF" (`ui/js/pdf-export.js`, pdf-lib + fontkit vendored in `ui/vendor/pdf-lib/`,
+  Fira Sans with DejaVu Sans for symbols, so Greek letters and arrows survive): the marks burned in,
+  each note as a sticky note and a "My notes" page at the end; saved to Downloads (`save_download`).
+- Replacing or removing a PDF that has notes or marks always goes through `confirmReplace`
+  (export first / replace without exporting / cancel); the new PDF starts clean (`forgetAnnotations`).
+  Every replace path in Courses uses it.
+- "Use my notes" (`D.settings.useNotes`, a switch beside "With schemas" for quiz questions and
+  flashcards): her notes, highlighted text and text boxes go into the prompt as extra material
+  (`ui/js/mynotes-core.js`); when off or empty the prompts are unchanged.
 - Themes (`ui/js/themes-core.js`): 8 keys (basic, molecular, pathology, clinical, epidemiology,
   pharmacology, trials, modelling), chips shared by the quiz and the flashcards; view state, with
   basic, molecular, pathology and pharmacology ticked at each start. Every quiz, card and fiche-quiz

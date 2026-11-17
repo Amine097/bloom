@@ -9,6 +9,7 @@ import { esc, icon, app, openViewer, confirmBox, cvar, toast, select } from "../
 import { pdfUrl } from "../files.js";
 import {
   runJob, runFicheJob, isRunning, isRunningWithSchemas, setupNeeded, withSchemas, setSchemas, schemasToggle, takesAbout,
+  usingNotes, setUseNotes, notesToggle, myNotesFor,
   themeChips, themeTags, checkedThemes, toggleTheme, sortByTheme,
 } from "./notebook-jobs.js";
 import { unclassified } from "../themes-core.js";
@@ -157,7 +158,7 @@ function genControls(label, room) {
   return `<div class="toolbar nb-gen">
       ${select("count", counts, view.genCount, 'class="pill-select" data-change="genCount" aria-label="How many questions"')}
       ${select("level", LEVEL_CHOICES, view.genLevel, 'class="pill-select" data-change="genLevel" aria-label="Kind of questions"')}
-      ${schemasToggle()}
+      ${schemasToggle()}${notesToggle([view.sel])}
       <button class="btn ghost" data-act="generate" data-kind="quiz">${icon("spark", 16)} ${label}</button>
     </div>
     <div class="toolbar nb-themes-row"><span class="small">Themes</span>${themeChips()}</div>
@@ -412,7 +413,7 @@ function chooserCard(gs) {
       <div class="toolbar"><span class="small">Questions</span>${sizeChips}</div>
       <div class="toolbar"><span class="small">Difficulty</span>${levelChips}</div>
       <div class="toolbar nb-themes-row"><span class="small">Themes</span>${themeChips()}</div>
-      <div class="toolbar nbq-mode"><span class="small">New questions</span>${schemasToggle()}</div>
+      <div class="toolbar nbq-mode"><span class="small">New questions</span>${schemasToggle()}${notesToggle(picked)}</div>
       <div class="nbq-go"><p class="small">${summary}</p><span class="grow"></span>
         <button class="btn primary" data-act="quizStart" ${picked.length ? "" : "disabled"}>${icon("todo", 16)} Start the quiz</button></div>
     </div>
@@ -505,7 +506,7 @@ function promptFor(id, kind, schemas) {
   if (kind === "guide") return guidePrompt(title, { schemas });
   const z = bankOf(id);
   const room = BANK_MAX - (z?.questions.length ?? 0);
-  return quizPrompt(title, { count: Math.min(view.genCount, room), level: view.genLevel, avoid: (z?.questions ?? []).map(x => x.q), schemas, themes: checkedThemes() });
+  return quizPrompt(title, { count: Math.min(view.genCount, room), level: view.genLevel, avoid: (z?.questions ?? []).map(x => x.q), schemas, themes: checkedThemes(), myNotes: myNotesFor(id) });
 }
 
 /** Adds the questions Claude wrote to lecture `id`'s bank. Returns the message for the toast. */
@@ -554,15 +555,17 @@ const scrollTop = () => { const main = document.getElementById("main"); if (main
 
 /**
  * Has Claude write `count` questions at `level` on `themes` for lecture `id`, quietly, "With
- * schemas" or not. Resolves true when some were added.
+ * schemas" or not, with her notes or not ("Use my notes": `mine`). Resolves true when some were added.
  */
-function makeQuestions(id, count, level, schemas, themes) {
+function makeQuestions(id, count, level, schemas, themes, mine = false) {
   const z = bankOf(id);
   const fiche = isFicheSrc(id);
-  // a fiche's questions come from its text (fiches-core.js): "With schemas" does not apply
-  const prompt = quizPrompt(srcTitle(id), { count, level, avoid: (z?.questions ?? []).map(x => x.q), schemas: schemas && !fiche, themes });
+  const myNotes = myNotesFor(id, mine);
+  // a fiche's questions come from its text (fiches-core.js): "With schemas" does not apply, and its
+  // notes go in page window by page window (runFicheJob)
+  const prompt = quizPrompt(srcTitle(id), { count, level, avoid: (z?.questions ?? []).map(x => x.q), schemas: schemas && !fiche, themes, myNotes: fiche ? null : myNotes });
   const done = (text, now) => { addQuestions(id, parseQuiz(text), now.title); };
-  return fiche ? runFicheJob(id, "quiz", prompt, done) : runJob(id, "quiz", prompt, done, { schemas });
+  return fiche ? runFicheJob(id, "quiz", prompt, done, { myNotes }) : runJob(id, "quiz", prompt, done, { schemas });
 }
 
 /** Runs `work(item)` for every item, at most `n` at a time. */
@@ -582,8 +585,8 @@ async function startQuiz(lectures, size, level, themes = checkedThemes()) {
   if (!lectures.length || view.prep) return;
   view.page = "quiz";
   view.play = null;
-  const schemas = withSchemas();
-  const prep = { lectures, size, level, themes, schemas, stage: "sort", jobs: {} };
+  const schemas = withSchemas(), mine = usingNotes();
+  const prep = { lectures, size, level, themes, schemas, mine, stage: "sort", jobs: {} };
   const unsorted = lectures.filter(id => unclassified(bankOf(id)?.questions).length);
   if (unsorted.length) {
     prep.jobs = Object.fromEntries(unsorted.map(id => [id, "wait"]));
@@ -608,7 +611,7 @@ async function startQuiz(lectures, size, level, themes = checkedThemes()) {
       if (view.prep !== prep) return; // cancelled
       prep.jobs[p.lecture] = "run";
       app.refresh();
-      prep.jobs[p.lecture] = await makeQuestions(p.lecture, p.make, level, schemas, themes) ? "done" : "fail";
+      prep.jobs[p.lecture] = await makeQuestions(p.lecture, p.make, level, schemas, themes, mine) ? "done" : "fail";
       app.refresh();
     });
     if (view.prep !== prep) return;
@@ -740,6 +743,8 @@ export const actions = {
   genLevel: el => { view.genLevel = el.value; },
   // "Standard | With schemas", wherever it is shown (study guide, quiz, flashcards): one remembered choice
   nbSchemas: el => { setSchemas(el.dataset.on === "1"); app.refresh(); },
+  // "Use my notes", beside it wherever quiz questions or flashcards are written: one remembered choice
+  nbNotes: () => { setUseNotes(!usingNotes()); app.refresh(); },
   // the theme chips, wherever they are shown (quiz page, a lecture's Quiz tab, flashcards): one choice for all
   nbTheme: el => {
     if (!toggleTheme(el.dataset.theme)) { toast("Keep at least one theme ticked."); return; }
