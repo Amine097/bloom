@@ -5,3 +5,4 @@ src-tauri/gen/
 *.key.pub
 .DS_Store
 .playwright-mcp/
+ui/js/media-defaults.js

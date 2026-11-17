@@ -2,7 +2,8 @@
 // It also answers POST /api/ask?via=claude|codex, which runs the local Claude Code or Codex CLI (on a
 // lecture PDF or none), the way the native shell does in the app (see ask_claude and ask_codex in
 // src-tauri/src/lib.rs), GET /api/claude-status and /api/codex-status, and POST /api/pdf-text (the
-// text of a lecture PDF, like pdf_text in lib.rs).
+// text of a lecture PDF, like pdf_text in lib.rs), and POST /api/media and /api/media-image (her Jellyfin and
+// Jellyseerr, like media_fetch and media_image).
 import { createServer } from "node:http";
 import { readFile, writeFile, mkdtemp, rm, mkdir, readdir } from "node:fs/promises";
 import { spawn } from "node:child_process";
@@ -401,6 +402,44 @@ async function ficheApi(req, res, action) {
   }
 }
 
+// ---- POST /api/media: one request to her Jellyfin or Jellyseerr, { method, url, headers: [[k, v]],
+// body } in, { status, body, cookie } out, as media_fetch in the native shell; POST /api/media-image:
+// { url } in, the poster's bytes out (media_image).
+
+const isHttp = u => typeof u === "string" && /^https?:\/\/[^\s]+$/i.test(u);
+
+async function mediaFetch(req, res) {
+  if (!allowed(req)) return sendJson(res, 403, { error: "Not allowed." });
+  let q;
+  try { q = JSON.parse(String(await readBody(req))); } catch { return sendJson(res, 400, { error: "Bad request." }); }
+  if (!isHttp(q.url) || !["GET", "POST", "PUT", "DELETE"].includes(q.method)) return sendJson(res, 400, { error: "invalid request" });
+  try {
+    const r = await fetch(q.url, {
+      method: q.method, headers: q.headers || [], body: q.body ?? undefined,
+      redirect: "manual", signal: AbortSignal.timeout(25_000),
+    });
+    const cookie = (r.headers.getSetCookie?.() || []).map(c => c.split(";")[0].trim()).join("; ");
+    sendJson(res, 200, { status: r.status, body: await r.text(), cookie });
+  } catch (e) {
+    sendJson(res, 502, { error: "unreachable: " + (e.cause?.message || e.message) });
+  }
+}
+
+async function mediaImage(req, res) {
+  if (!allowed(req)) return sendJson(res, 403, { error: "Not allowed." });
+  let q;
+  try { q = JSON.parse(String(await readBody(req))); } catch { return sendJson(res, 400, { error: "Bad request." }); }
+  if (!isHttp(q.url)) return sendJson(res, 400, { error: "invalid address" });
+  try {
+    const r = await fetch(q.url, { signal: AbortSignal.timeout(25_000) });
+    if (!r.ok) return sendJson(res, 404, { error: "no image" });
+    res.writeHead(200, { "Content-Type": r.headers.get("content-type") || "image/jpeg", "Cache-Control": "no-store" });
+    res.end(Buffer.from(await r.arrayBuffer()));
+  } catch {
+    sendJson(res, 404, { error: "no image" });
+  }
+}
+
 createServer(async (req, res) => {
   let path;
   try { path = decodeURIComponent(new URL(req.url, "http://x").pathname); }
@@ -416,6 +455,10 @@ createServer(async (req, res) => {
   }
   if (path === "/api/convert") {
     if (req.method === "POST") return convert(req, res);
+    res.writeHead(405).end(); return;
+  }
+  if (path === "/api/media" || path === "/api/media-image") {
+    if (req.method === "POST") return path === "/api/media" ? mediaFetch(req, res) : mediaImage(req, res);
     res.writeHead(405).end(); return;
   }
   if (path === "/api/claude-status" || path === "/api/codex-status") {

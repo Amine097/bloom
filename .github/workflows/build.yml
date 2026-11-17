@@ -51,6 +51,11 @@ jobs:
         if: env.DEPLOY == 'true'
         run: node scripts/next-version.mjs --apply
 
+      - name: Build in the connection to her Jellyfin and Jellyseerr (secret BLOOM_MEDIA)
+        env:
+          BLOOM_MEDIA: ${{ secrets.BLOOM_MEDIA }}
+        run: node scripts/media-defaults.mjs
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

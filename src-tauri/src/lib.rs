@@ -2,7 +2,7 @@
 //! file (load, atomic save, one backup per day, export to the Downloads folder, where annotated
 //! PDFs are saved too), the lecture PDFs stored beside it in `pdfs/`, turning slides into PDFs
 //! with Keynote, and running the assistants' CLIs: Claude Code, and Codex as its backup (install,
-//! sign-in, asking).
+//! sign-in, asking), and the requests of the Movies & series page to her Jellyfin and Jellyseerr.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -1673,6 +1673,151 @@ async fn fiche_delete(app: AppHandle, id: String) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
+// ---- Movies & series: her Jellyfin and Jellyseerr, on the homelab over Tailscale. The page cannot
+// reach them itself (the CSP only allows ipc, and plain http is blocked from the app's secure
+// origin), so these commands make the requests with curl, which ships with macOS.
+
+const MEDIA_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Only http(s) addresses, with nothing a shell or curl could read as something else.
+fn media_url_ok(url: &str) -> bool {
+    (url.starts_with("http://") || url.starts_with("https://"))
+        && url.len() < 4096
+        && !url.chars().any(|c| c.is_control() || c == ' ')
+}
+
+fn find_bytes(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    hay.windows(needle.len()).position(|w| w == needle)
+}
+
+/// Splits what `curl -D -` printed into the status, the cookies set and the body. Interim answers
+/// (100 Continue) come first and are skipped.
+fn read_curl_response(out: &[u8]) -> serde_json::Value {
+    let mut rest = out;
+    let mut status: u16 = 0;
+    let mut cookies: Vec<String> = Vec::new();
+    while rest.starts_with(b"HTTP/") {
+        let end = match find_bytes(rest, b"\r\n\r\n") {
+            Some(i) => i,
+            None => break,
+        };
+        let head = String::from_utf8_lossy(&rest[..end]).into_owned();
+        rest = &rest[end + 4..];
+        let mut lines = head.lines();
+        status = lines
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse().ok())
+            .unwrap_or(0);
+        cookies.clear();
+        for line in lines {
+            if let Some((name, value)) = line.split_once(':') {
+                if name.trim().eq_ignore_ascii_case("set-cookie") {
+                    if let Some(pair) = value.trim().split(';').next() {
+                        cookies.push(pair.trim().to_string());
+                    }
+                }
+            }
+        }
+        if !(100..200).contains(&status) {
+            break;
+        }
+    }
+    serde_json::json!({
+        "status": status,
+        "body": String::from_utf8_lossy(rest).into_owned(),
+        "cookie": cookies.join("; ")
+    })
+}
+
+/// One request to her Jellyfin or Jellyseerr: `{ status, body, cookie }`. An error starting with
+/// "unreachable" means the server could not be reached at all (Tailscale off, wrong address).
+#[tauri::command]
+async fn media_fetch(
+    method: String,
+    url: String,
+    headers: Vec<(String, String)>,
+    body: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let method = method.to_ascii_uppercase();
+    if !["GET", "POST", "PUT", "DELETE"].contains(&method.as_str()) {
+        return Err("invalid method".into());
+    }
+    if !media_url_ok(&url) {
+        return Err("invalid address".into());
+    }
+    for (name, value) in &headers {
+        let bad_name = name.is_empty() || name.chars().any(|c| !(c.is_ascii_alphanumeric() || c == '-'));
+        if bad_name || value.chars().any(|c| c == '\r' || c == '\n') {
+            return Err("invalid header".into());
+        }
+    }
+    tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
+        let mut cmd = Command::new("/usr/bin/curl");
+        cmd.args(["-q", "-sS", "--max-time", "25", "--connect-timeout", "8", "-D", "-", "-X"])
+            .arg(&method);
+        for (name, value) in &headers {
+            cmd.arg("-H").arg(format!("{name}: {value}"));
+        }
+        if body.is_some() {
+            cmd.args(["--data-binary", "@-"]);
+        }
+        cmd.arg("--url").arg(&url);
+        let input = body.unwrap_or_default();
+        match run_with_timeout(cmd, input.as_bytes(), MEDIA_TIMEOUT) {
+            Ok(Some((status, out, err))) => {
+                if status.success() {
+                    Ok(read_curl_response(&out))
+                } else {
+                    Err(format!("unreachable: {}", tail_text(&err, 300)))
+                }
+            }
+            Ok(None) => Err("unreachable: no answer in time".into()),
+            Err(e) => Err(format!("unreachable: {e}")),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// A poster from her Jellyfin, as bytes.
+#[tauri::command]
+async fn media_image(url: String) -> Result<tauri::ipc::Response, String> {
+    if !media_url_ok(&url) {
+        return Err("invalid address".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || -> Result<tauri::ipc::Response, String> {
+        let mut cmd = Command::new("/usr/bin/curl");
+        cmd.args(["-q", "-sS", "-f", "--max-time", "25", "--connect-timeout", "8", "--url"])
+            .arg(&url);
+        match run_with_timeout(cmd, b"", MEDIA_TIMEOUT) {
+            Ok(Some((status, out, _))) if status.success() && !out.is_empty() => {
+                Ok(tauri::ipc::Response::new(out))
+            }
+            _ => Err("no image".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Opens an http(s) link in her default browser (Play opens Jellyfin there).
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    if !media_url_ok(&url) {
+        return Err("invalid address".into());
+    }
+    let status = Command::new("/usr/bin/open")
+        .arg(&url)
+        .status()
+        .map_err(|e| format!("Could not open the link: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("Could not open the link.".into())
+    }
+}
+
 /// The print dialog for the window (window.print() does nothing in WKWebView). The fiche viewer
 /// sets the print styles that leave only its A4 pages.
 #[tauri::command]
@@ -1715,6 +1860,9 @@ pub fn run() {
             fiche_files,
             fiche_slide,
             fiche_delete,
+            media_fetch,
+            media_image,
+            open_url,
             print_page
         ])
         .run(tauri::generate_context!())

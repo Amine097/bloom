@@ -160,6 +160,19 @@ The updater signing key is in `~/.tauri/bloom.key` (never commit it) and in the 
   to sunrise, and by day the meadow and the cherry blossoms swapping every two hours; the timer also
   wakes at sunrise and sunset. Fixed choices: "nature", "blossom", "ocean", "plain"; each has a
   matching sidebar. Unknown values fall back to the meadow.
+- Movies & series (`views/media.js`, nav "Movies"): her Jellyfin library (films and series, watched /
+  started / not started, Continue watching, episodes per season) and Jellyseerr (Discover, search,
+  Request with season picking, her requests). Play opens Jellyfin's web page in her browser (`open_url`);
+  Bloom has no player. Both servers are on the homelab over Tailscale; every request goes through
+  `media_fetch` / `media_image` in the native shell (curl, since the CSP only allows ipc and http is
+  blocked from the app's origin) and `/api/media`, `/api/media-image` in the preview. TMDB posters load
+  directly (`https://image.tmdb.org` in the CSP's img-src). She never types the connection: the build
+  writes `ui/js/media-defaults.js` (git-ignored) from the repo secret `BLOOM_MEDIA`
+  (`{"jellyfin","seerr","user"}`, `scripts/media-defaults.mjs`) and the page connects by itself; without
+  it (the preview, unless the file is made locally) the page shows a form. The session is in
+  `D.settings.media` (absent until connected, so no migration; shape at the top of `ui/js/media-core.js`):
+  addresses, username, no password, the Jellyfin token, the Jellyseerr cookie (Jellyseerr signs her in with
+  her Jellyfin account). Pure logic in `media-core.js`, requests in `media.js`.
 - Assistants: Claude Code first; Codex (OpenAI's CLI, her ChatGPT account) is the backup while
   Claude's usage limit lasts or when Claude is not set up (`ui/js/assistant-core.js`). The native
   shell has the same commands for both (`ask_*`, `*_status`, `*_install`, `*_login`, ...).
