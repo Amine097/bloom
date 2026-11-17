@@ -31,6 +31,9 @@ const PATHS = {
   file: "M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 17h6",
   clip: "M20 11.5l-8.3 8.3a5 5 0 01-7-7L13 4.5a3.3 3.3 0 014.7 4.7l-8.2 8.2a1.7 1.7 0 01-2.4-2.4L14.5 7.6",
   chart: "M4 20V11M10 20V5M16 20v-6M21 20H3",
+  chevL: "M15 6l-6 6 6 6",
+  chevR: "M9 6l6 6-6 6",
+  minus: "M5 12h14",
 };
 export const icon = (name, size = 18) =>
   `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${PATHS[name]}"/></svg>`;
@@ -88,25 +91,34 @@ export function confirmBox(title, message, okLabel = "Delete") {
 }
 
 let viewerUrl = null;
+let viewerTurn = 0;
+let viewer = null; // viewer.js, loaded the first time a PDF opens
 
 /**
- * Shows a PDF over the whole window, at `page` when given. `url` is an object URL; it is released
- * when the viewer closes.
+ * Shows a PDF over the whole window in Bloom's own viewer (viewer.js), at `page` when given. `url`
+ * comes from pdfUrl (files.js) and is released when the viewer closes. `notes`: the quiz source of
+ * the PDF (a lecture id or "fiche:<id>", see sources.js) to show her notes per slide beside it.
  */
-export function openViewer(title, url, page = null) {
+export function openViewer(title, url, page = null, { notes = null } = {}) {
   closeViewer();
+  const turn = ++viewerTurn;
   viewerUrl = url;
-  const at = Number.isInteger(page) && page > 0 ? `#page=${page}` : "";
-  $("#viewer").innerHTML = `
-    <div class="viewer" role="dialog" aria-modal="true" aria-label="${esc(title)}">
-      <header><b>${esc(title)}${at ? ` <span class="muted">· page ${page}</span>` : ""}</b><button type="button" class="iconbtn" data-viewer="close" aria-label="Close">${icon("close")}</button></header>
-      <iframe src="${esc(url + at)}" title="${esc(title)}"></iframe>
-    </div>`;
-  $("#viewer").hidden = false;
-  $("#viewer button").focus();
+  const host = $("#viewer");
+  host.innerHTML = `<div class="viewer pv"><p class="pv-wait">Opening the PDF…</p></div>`;
+  host.hidden = false;
+  import("./viewer.js").then(mod => {
+    viewer = mod;
+    if (turn === viewerTurn && viewerUrl === url) mod.show(host, { title, url, page: Number(page) || null, notes });
+  }).catch(e => {
+    if (turn !== viewerTurn) return;
+    closeViewer();
+    toast("The PDF viewer could not start: " + (e?.message || e), "error");
+  });
 }
 
 export function closeViewer() {
+  viewerTurn++;
+  viewer?.close();
   $("#viewer").hidden = true;
   $("#viewer").innerHTML = "";
   if (viewerUrl) URL.revokeObjectURL(viewerUrl);

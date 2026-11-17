@@ -107,3 +107,30 @@ test("examGroups: modules sharing an exam still to come", () => {
   const modules = { a: { exam: "2026-12-21" }, b: { exam: "2026-12-21" }, c: { exam: "2027-01-08" }, d: { exam: "2026-10-01" }, e: { exam: "2026-10-01" }, f: { exam: null } };
   assert.deepEqual(examGroups(modules, "2026-11-14"), [{ date: "2026-12-21", ids: ["a", "b"] }]);
 });
+
+test("planQuiz counts only questions of the ticked themes, so Claude writes more when a theme is thin", () => {
+  const bank = {
+    lecture: "a", quizzes: 0, questions: [
+      ...Array.from({ length: 8 }, (_, i) => q(`b${i}`, { themes: ["basic"] })),
+      q("t1", { themes: ["trials", "clinical"] }),
+      q("u1"), // not sorted yet: counts for any theme
+    ],
+  };
+  assert.equal(planQuiz([bank], 5, "mixed", ["basic"])[0].ready, 9);
+  assert.equal(planQuiz([bank], 5, "mixed", ["basic"])[0].make, 0);
+  const trials = planQuiz([bank], 5, "mixed", ["trials"])[0];
+  assert.equal(trials.ready, 2);
+  assert.equal(trials.make, GEN_MIN + 1); // short by 3, plus the spare
+  assert.equal(planQuiz([bank], 5, "mixed")[0].ready, 10); // no themes: everything
+});
+
+test("drawQuiz only asks questions with a ticked theme", () => {
+  const bank = {
+    lecture: "a", quizzes: 0, questions: [
+      q(1, { themes: ["basic"] }), q(2, { themes: ["trials"] }), q(3, { themes: ["clinical", "pharmacology"] }), q(4),
+    ],
+  };
+  assert.deepEqual(drawQuiz([bank], 5, "mixed", fixed, ["pharmacology", "basic"]).map(x => x.id).sort(), [1, 3, 4]);
+  assert.deepEqual(drawQuiz([bank], 5, "mixed", fixed, ["trials"]).map(x => x.id).sort(), [2, 4]);
+  assert.equal(drawQuiz([bank], 5, "mixed", fixed).length, 4);
+});

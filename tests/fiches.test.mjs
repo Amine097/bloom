@@ -190,3 +190,12 @@ test("the fiche quiz prompt carries the pages' text and no file to read", async 
   assert.match(p, /Page numbers are those of the sheet/);
   assert.ok(!/pages \d+ to \d+ of/.test(ficheQuizPrompt(quizPrompt("H"), "H", pages, 2)));
 });
+
+test("the fiche quiz prompt keeps the themes she ticked", async () => {
+  const { ficheQuizPrompt } = await import("../ui/js/fiches-core.js");
+  const { quizPrompt } = await import("../ui/js/notebook-core.js");
+  const p = ficheQuizPrompt(quizPrompt("Heart", { count: 5, themes: ["pathology", "clinical"] }), "Heart sheet", [{ n: 1, text: "Reentry" }], 1);
+  assert.match(p, /Write questions only on these themes[^\n]*\n- "pathology"[^\n]*\n- "clinical"/);
+  assert.match(p, /Do not write questions on these themes/);
+  assert.match(p, /"themes": \["pathology"\]/);
+});

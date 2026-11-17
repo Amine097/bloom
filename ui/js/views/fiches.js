@@ -553,6 +553,7 @@ async function remove(id) {
     forgetImages(id);
   }
   delete D.fiches[id];
+  delete D.slideNotes?.[ficheSrc(id)];
   save();
   if (view.sel === id) { view.page = "list"; view.sel = null; }
   app.refresh();
@@ -582,7 +583,7 @@ export const actions = {
   openUpload: async el => {
     const f = D.fiches[el.dataset.id];
     if (!f?.pdf) return;
-    try { openViewer(f.title, await pdfUrl(f.pdf.id)); }
+    try { openViewer(f.title, await pdfUrl(f.pdf.id), null, { notes: ficheSrc(el.dataset.id) }); }
     catch { toast("This PDF could not be opened. Upload it again.", "error"); }
   },
   quiz: el => {

@@ -4,7 +4,10 @@
 import { D, save, uid } from "../store.js";
 import { today, relDay } from "../dates.js";
 import { esc, icon, app, confirmBox, toast, select } from "../ui.js";
-import { runJob, isRunning, isRunningWithSchemas, withSchemas, schemasToggle, takesAbout } from "./notebook-jobs.js";
+import {
+  runJob, isRunning, isRunningWithSchemas, withSchemas, schemasToggle, takesAbout, themeChips, themeTags, checkedThemes, sortByTheme, isSorting,
+} from "./notebook-jobs.js";
+import { matchesThemes, unclassified } from "../themes-core.js";
 import {
   cardsPrompt, parseCards, mergeCards, deckOf, pickCards, withGrade, deckStats, sessionEntry, DECK_MAX, GEN_COUNTS,
 } from "../cards-core.js";
@@ -46,14 +49,17 @@ const progressLine = cards => {
 const head = (deck, extra = "") => `<div class="card-h"><h3>Flashcards</h3>
   <span class="muted small">${progressLine(deck.cards)}</span><span class="grow"></span>${extra}</div>`;
 
-/** How many cards Claude should write next. */
-function genControls(label, room) {
+/** The theme chips (shared with the quiz): what Claude writes cards on, and what a session shows. */
+const themesRow = () => `<div class="toolbar nb-themes-row"><span class="small">Themes</span>${themeChips()}</div>`;
+
+/** How many cards Claude should write next; `themes`: with the theme chips. */
+function genControls(label, room, themes = false) {
   const asked = Math.min(view.genCount, room);
   return `<div class="toolbar nb-gen">
       ${select("count", GEN_COUNTS.map(n => [n, `${n} cards`]), view.genCount, 'class="pill-select" data-change="cardGenCount" aria-label="How many cards"')}
       ${schemasToggle()}
       <button class="btn primary" data-act="cardGenerate">${icon("spark", 16)} ${label}</button>
-    </div>
+    </div>${themes ? themesRow() : ""}
     ${asked < view.genCount ? `<p class="small muted">The deck has room for ${room} more, so Claude writes ${asked}.</p>` : ""}`;
 }
 
@@ -69,23 +75,32 @@ function emptyCard(id) {
   return `<section class="card"><div class="empty nb-wait">
     <p class="lead">No flashcards yet.</p>
     <p class="small">Claude reads the PDF and writes cards with a question or a term on the front and a short answer on the back, each with its page. You flip them and say whether you knew the answer; the ones you did not know come back first.</p>
-    ${genControls("Generate flashcards", DECK_MAX)}
+    ${genControls("Generate flashcards", DECK_MAX, true)}
   </div></section>`;
 }
 
+/** While Claude sorts the deck's cards by theme, before a session. */
+const sortingCard = deck => `<section class="card">${head(deck)}<div class="empty nb-wait" role="status"><span class="nb-spin" aria-hidden="true"></span>
+  <p class="lead">Sorting your cards by theme…</p>
+  <p class="small">A quick one-off: Claude tags the cards you already have with their themes, so a session only shows those on the themes you chose. The session starts by itself.</p></div></section>`;
+
 function startCard(deck) {
-  const n = deck.cards.length;
-  const s = deckStats(deck.cards);
+  const themes = checkedThemes();
+  const mine = deck.cards.filter(x => matchesThemes(x, themes));
+  const n = mine.length;
+  const s = deckStats(mine);
   const lens = [...LENS.filter(k => k < n), "all"];
   const len = view.len === "all" || view.len >= n ? "all" : view.len;
   const chips = lens.map(k => `<button class="chip ${len === k ? "on" : ""}" data-act="cardSetLen" data-len="${k}" aria-pressed="${len === k}">${k === "all" ? `All ${n}` : k}</button>`).join("");
   const status = [s.fresh && `${s.fresh} never seen`, s.notYet && `${s.notYet} not known last time`].filter(Boolean).join(" · ");
   return `<section class="card">${head(deck)}
     <div class="empty nb-wait">
-      <p class="lead">${plural(n, "card")} in the deck.</p>
+      <p class="lead">${n === deck.cards.length ? `${plural(n, "card")} in the deck.` : `${n} of the ${plural(deck.cards.length, "card")} are on your themes.`}</p>
       <p class="small">${status ? `${status}. ` : ""}Each session shows those first, then the ones you have not seen for longest.</p>
-      <div class="toolbar nb-len" role="group" aria-label="Cards per session"><span class="small">Cards per session</span>${chips}</div>
-      <div class="btns center"><button class="btn primary" data-act="cardStart">Start reviewing</button></div>
+      ${themesRow()}
+      ${n ? `<div class="toolbar nb-len" role="group" aria-label="Cards per session"><span class="small">Cards per session</span>${chips}</div>` : ""}
+      <div class="btns center"><button class="btn primary" data-act="cardStart" ${n ? "" : "disabled"}>Start reviewing</button></div>
+      ${n ? "" : `<p class="small muted">No card is on the themes you ticked: tick another theme, or have Claude write cards on them below.</p>`}
     </div>
   </section>`;
 }
@@ -96,7 +111,7 @@ function sessionCard(deck, p) {
   const face = p.flipped
     ? `<div class="nbc-card flipped">
         <p class="nbc-front">${esc(x.front)}</p>
-        <div class="nbc-back"><p>${esc(x.back)}</p>${pageTag(x.page)}</div>
+        <div class="nbc-back"><p>${esc(x.back)}</p>${pageTag(x.page)}${themeTags(x)}</div>
       </div>`
     : `<div class="nbc-card" data-act="cardFlip" title="Show the answer"><p class="nbc-front">${esc(x.front)}</p></div>`;
   const buttons = p.flipped
@@ -135,6 +150,7 @@ function resultCard(deck, p) {
         ${missed.length ? `<button class="btn primary" data-act="cardRetry">${icon("repeat", 16)} Go again with the ones I missed</button>` : ""}
         <button class="btn ${missed.length ? "ghost" : "primary"}" data-act="cardStart">New session</button>
       </div>
+      ${themesRow()}
     </div>
     ${review ? `<div class="card-b"><h4 class="nb-h">Not yet</h4><ol class="nb-review">${review}</ol></div>` : ""}
   </section>`;
@@ -153,7 +169,7 @@ function deckCard(id, deck) {
   const rows = view.showList ? `<div class="nb-bank nbc-list">${deck.cards.map(x => `<div class="row">
       <div class="row-main"><span class="t">${esc(x.front)}</span>
         <span class="nbc-ans">${esc(x.back)}</span>
-        <span class="sub"><span>${stats(x)}</span>${pageTag(x.page)}</span></div>
+        <span class="sub"><span>${stats(x)}</span>${pageTag(x.page)}${themeTags(x)}</span></div>
       <button class="iconbtn" data-act="cardDelete" data-card="${esc(x.id)}" title="Delete this card" aria-label="Delete this card">${icon("trash", 16)}</button>
     </div>`).join("")}</div>
     <div class="btns"><button class="btn danger small" data-act="cardClearAll">${icon("trash", 15)} Delete all cards</button></div>` : "";
@@ -168,6 +184,7 @@ function render(id) {
   const deck = deckFor(id);
   current = id;
   if (!deck || !deck.cards.length) return emptyCard(id);
+  if (isSorting(id, "card")) return sortingCard(deck) + deckCard(id, deck);
   let p = activePlay(id);
   if (p && !p.done && !findCard(deck, p.ids[p.i])) p = view.play = null; // its card is gone
   if (p && !p.done) return sessionCard(deck, p);
@@ -199,7 +216,7 @@ function generate(id) {
   const n = deck?.cards.length ?? 0;
   if (n >= DECK_MAX) { toast("The deck is full. Delete some cards first.", "error"); return; }
   const schemas = withSchemas();
-  const prompt = cardsPrompt(it.title, { count: Math.min(view.genCount, DECK_MAX - n), avoid: (deck?.cards ?? []).map(x => x.front), schemas });
+  const prompt = cardsPrompt(it.title, { count: Math.min(view.genCount, DECK_MAX - n), avoid: (deck?.cards ?? []).map(x => x.front), schemas, themes: checkedThemes() });
   runJob(id, KIND, prompt, (text, now) => store(id, parseCards(text), now.title), { schemas });
 }
 
@@ -211,6 +228,24 @@ function logSession(p) {
   p.logged = true;
   D.cardLog = [...(D.cardLog || []), entry];
   save();
+}
+
+/**
+ * Starts a session on the ticked themes. Cards not sorted by theme yet are sorted first (one quick
+ * run); when that fails they count for every theme and the next session tries again.
+ */
+async function startThemed(id) {
+  if (!deckFor(id) || isSorting(id, "card")) return;
+  if (unclassified(deckFor(id).cards).length) {
+    logSession(view.play);
+    view.play = null;
+    await sortByTheme(id, "card", () => deckFor(id)?.cards ?? []);
+  }
+  const deck = deckFor(id);
+  if (!deck) return;
+  const ids = pickCards(deck.cards, view.len, Math.random, checkedThemes());
+  if (!ids.length) { toast("No card is on the themes you ticked yet.", "error"); app.refresh(); return; }
+  startSession(id, ids, false);
 }
 
 function startSession(id, ids, retry) {
@@ -262,10 +297,7 @@ const actions = {
   cardGenCount: el => { view.genCount = Number(el.value) || 10; app.refresh(); },
   cardGenerate: () => { const id = sel(); if (id) generate(id); },
   cardSetLen: el => { view.len = el.dataset.len === "all" ? "all" : Number(el.dataset.len); app.refresh(); },
-  cardStart: () => {
-    const id = sel(), deck = deckFor(id);
-    if (deck) startSession(id, pickCards(deck.cards, view.len), false);
-  },
+  cardStart: () => { const id = sel(); if (id) startThemed(id); },
   cardRetry: () => {
     const id = sel(), p = activePlay(id);
     if (!p?.done) return;

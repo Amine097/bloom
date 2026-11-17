@@ -50,7 +50,12 @@ function migrate(data) {
   // writes (shape at the top of ui/js/fiches-core.js). Nothing to convert.
   if (!Array.isArray(data.cardLog)) data.cardLog = [];
   data.fiches ??= {};
-  data.version = 6;
+  // v7: D.slideNotes holds her notes per slide, by quiz source (a lecture id or "fiche:<id>", see
+  // ui/js/sources.js) then PDF page: { [src]: { [page]: { text, at: "YYYY-MM-DD" } } }. Questions
+  // and flashcards may carry `themes` (keys of THEMES in ui/js/themes-core.js); absent means not
+  // yet classified. Nothing to convert.
+  data.slideNotes ??= {};
+  data.version = 7;
   return data;
 }
 

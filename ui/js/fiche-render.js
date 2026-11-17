@@ -799,7 +799,7 @@ async function gotoSlide(id, key, page) {
   const lid = Object.entries(f?.keys || {}).find(([, k]) => k === key)?.[0];
   const it = lid && D.items[lid];
   if (!it?.pdf) { toast("The PDF of this lecture is not in Bloom any more.", "error"); return; }
-  try { openViewer(it.title, await pdfUrl(it.pdf.id), Number(page) || null); }
+  try { openViewer(it.title, await pdfUrl(it.pdf.id), Number(page) || null, { notes: lid }); }
   catch { toast("This PDF could not be opened. Attach it again from Courses.", "error"); }
 }
 

@@ -1,12 +1,16 @@
 // The Notebook's background jobs: the one place that asks the assistant about a lecture PDF.
 // Every tab (study guide, quiz, flashcards, questions) starts its work through runJob().
 import { D, save } from "../store.js";
-import { app, toast } from "../ui.js";
+import { app, toast, esc, icon } from "../ui.js";
 import { askAboutPdf, askAssistant, assistantStatus } from "../assistant.js";
 import { ficheText } from "../fiche-run.js";
 import { pagesOf } from "../pdftext-core.js";
 import { ficheWindow, ficheQuizPrompt } from "../fiches-core.js";
 import { srcFiche, ficheIdOf } from "../sources.js";
+import { extractJson } from "../notebook-core.js";
+import {
+  THEMES, THEME_KEYS, DEFAULT_THEMES, themeOf, isClassified, unclassified, classifyPrompt, readClassification, questionText, cardText,
+} from "../themes-core.js";
 
 /** "<lectureId>:<kind>" → { schemas } while the assistant is working on it. */
 const running = new Map();
@@ -42,6 +46,60 @@ export function schemasToggle({ hint = true } = {}) {
       ${hint ? `<small class="nb-seg-hint">${line}</small>` : ""}
     </span>`;
 }
+
+// ---- themes: what she is tested on (themes-core.js), shared by the quiz and the flashcards
+
+/** The ticked themes. View state, never saved: the defaults come back each time Bloom starts. */
+const themesOn = new Set(DEFAULT_THEMES);
+/** The ticked theme keys, in THEMES order. */
+export const checkedThemes = () => THEME_KEYS.filter(k => themesOn.has(k));
+/** Ticks or unticks theme `key`. The last ticked theme cannot be unticked: → false then. */
+export function toggleTheme(key) {
+  if (!themeOf(key)) return false;
+  if (themesOn.has(key)) {
+    if (themesOn.size === 1) return false;
+    themesOn.delete(key);
+  } else themesOn.add(key);
+  return true;
+}
+
+/** The row of theme chips, wherever she generates or starts a quiz or a review; the action "nbTheme" (notebook.js) toggles one. */
+export function themeChips() {
+  const chip = t => {
+    const on = themesOn.has(t.key);
+    return `<button type="button" class="nb-theme-b ${on ? "on" : ""}" data-act="nbTheme" data-theme="${t.key}" aria-pressed="${on}" title="${esc(`${t.label}: ${t.about}`)}">${on ? icon("check", 13) : ""}${esc(t.short)}</button>`;
+  };
+  return `<span class="nb-themes" role="group" aria-label="Themes to be tested on">${THEMES.map(chip).join("")}</span>`;
+}
+
+/** A question's or a card's themes as small tags ("" when it has none yet). */
+export const themeTags = x => (isClassified(x)
+  ? `<span class="nb-tags">${x.themes.map(themeOf).filter(Boolean).map(t => `<span class="nb-tag" title="${esc(t.label)}">${esc(t.short)}</span>`).join("")}</span>` : "");
+
+/**
+ * Has the assistant sort by theme the items of source `src` that have none yet, in one quick run,
+ * text only (themes-core.js). `items()` returns the bank's questions or the deck's cards as they are
+ * now; `what` is "question" or "card". Resolves true when it worked or there was nothing to sort;
+ * on failure (a toast says so) the items stay unsorted, count as matching every theme, and the next
+ * use tries again.
+ */
+export async function sortByTheme(src, what, items) {
+  const todo = unclassified(items());
+  if (!todo.length) return true;
+  const prompt = classifyPrompt(todo.map(x => ({ id: x.id, text: what === "card" ? cardText(x) : questionText(x) })), what);
+  return track(`${src}:themes-${what}`, false, async () => {
+    let got;
+    try {
+      got = readClassification(extractJson(await askAssistant(prompt)), todo.map(x => x.id));
+    } catch (e) {
+      if (e?.code) throw e;
+      throw new Error(`Bloom could not sort your ${what}s by theme this time (${e?.message || e}). It tries again next time.`);
+    }
+    for (const x of items()) if (!isClassified(x) && got.has(x.id)) x.themes = got.get(x.id);
+    return "";
+  });
+}
+export const isSorting = (src, what) => running.has(`${src}:themes-${what}`);
 
 /** How long a generation takes, for the waiting messages. */
 export const takesAbout = schemas => (schemas ? "This takes several minutes: Claude reads every slide, diagrams included." : "This usually takes a minute or two.");

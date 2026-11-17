@@ -6,6 +6,7 @@ import { esc, icon, app, openModal, openViewer, confirmBox, field, input, select
 import { storePdf, pdfUrl, removePdf, fmtSize, SLIDES, FILE_ACCEPT } from "../files.js";
 import { matchFiles, titleFromFile, dateFromFile } from "../attach-core.js";
 import { LECTURE_FILES } from "../seed.js";
+import { noteCount } from "../slidenotes-core.js";
 
 const view = { module: "all", hideDone: false };
 
@@ -27,6 +28,12 @@ export function recallBadge(r) {
   return `<span class="badge ${cls}" ${why ? `title="${why}"` : ""}>${icon("clock", 13)} Recall ${r.n} · ${relDay(r.due, now)}${r.adapted ? " · exam" : ""}</span>`;
 }
 
+/** "3 notes" beside a lecture's PDF: the slides she wrote a note on, in the PDF viewer. */
+function slideNotes(id) {
+  const n = noteCount(D.slideNotes, id);
+  return n ? `<button class="pdf-notes" data-act="openPdf" data-id="${id}" title="Open the PDF with your notes">${n} note${n > 1 ? "s" : ""}</button>` : "";
+}
+
 function row(it, recalls) {
   const lecture = isLecture(it);
   const m = moduleOf(it);
@@ -35,7 +42,7 @@ function row(it, recalls) {
     ? stepper(it.id, it)
     : `<button class="check ${it.doneAt ? "on" : ""}" data-act="toggleItem" data-id="${it.id}" aria-label="Done" aria-pressed="${Boolean(it.doneAt)}">${icon("check", 14)}</button>`;
   const pdf = !lecture ? ""
-    : it.pdf ? `<button class="iconbtn pdf" data-act="openPdf" data-id="${it.id}" title="Open ${esc(it.pdf.name)}" aria-label="Open the lecture PDF">${icon("file", 17)}</button>`
+    : it.pdf ? `<button class="iconbtn pdf" data-act="openPdf" data-id="${it.id}" title="Open ${esc(it.pdf.name)}" aria-label="Open the lecture PDF">${icon("file", 17)}</button>${slideNotes(it.id)}`
     : `<label class="iconbtn pdf none" title="Attach the lecture PDF">${icon("clip", 17)}<input type="file" ${FILE_ACCEPT} data-change="attachPdf" data-id="${it.id}" aria-label="Attach the lecture PDF" hidden></label>`;
   return `<div class="row item ${lecture ? "" : "is-task"} ${!lecture && it.doneAt ? "done" : ""}" ${cvar(m.color)}>
     <span class="dot"></span>
@@ -144,6 +151,7 @@ function openEditor(id) {
       if (!await confirmBox("Delete this?", `"${it.title}" and its progress will be removed.`)) return;
       delete D.items[id];
       delete D.notebook[id];
+      delete D.slideNotes?.[id];
       save(); app.refresh();
       if (it.pdf) removePdf(it.pdf.id);
     } },
@@ -347,7 +355,7 @@ export const actions = {
   },
   openPdf: async el => {
     const it = D.items[el.dataset.id];
-    try { openViewer(it.title, await pdfUrl(it.pdf.id)); }
+    try { openViewer(it.title, await pdfUrl(it.pdf.id), null, { notes: el.dataset.id }); }
     catch { toast("This PDF could not be opened. Attach it again from the lecture.", "error"); }
   },
   setDate: el => {

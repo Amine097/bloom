@@ -4,13 +4,15 @@
 // D.notebook[itemId].cards = {
 //   createdAt: "YYYY-MM-DD",                    when the deck was first made
 //   cards: [{ id, front, back, page: n | null, addedAt: "YYYY-MM-DD",
-//             seen: n, right: n, lastSeen: "YYYY-MM-DD" | null, lastRight: true | false | null }],
+//             seen: n, right: n, lastSeen: "YYYY-MM-DD" | null, lastRight: true | false | null,
+//             themes?: [keys of themes-core.js] }],
 // }
 // "right" counts the times she graded the card "Knew it"; lastRight is her last grade.
 //
 // Every review session with at least one card graded (finished, stopped early or a retry round) is
 // also appended to D.cardLog as { date, lecture, seen: cards graded, knew: graded "Knew it" }.
 import { PDF_TOKEN, LOOK_LINE, extractJson, figureRules, normText, shuffled, withAnswer } from "./notebook-core.js";
+import { themesBlock, cleanThemes, matchesThemes } from "./themes-core.js";
 
 /** Most cards kept in one lecture's deck. */
 export const DECK_MAX = 80;
@@ -33,8 +35,10 @@ Rules:
 /**
  * `count` flashcards. `avoid` lists the fronts of the cards already in the deck, which Claude must
  * not repeat. `schemas`: about half of the cards are built on the figures (LOOK_LINE of notebook-core.js).
+ * `themes`: the theme keys she ticked (themes-core.js); Claude writes only on those and tags every
+ * card. null: no themes asked.
  */
-export function cardsPrompt(title, { count = 10, avoid = [], schemas = false } = {}) {
+export function cardsPrompt(title, { count = 10, avoid = [], schemas = false, themes = null } = {}) {
   const known = avoid.map(t => `- ${String(t).replace(/\s+/g, " ").trim()}`).join("\n");
   const figures = schemas ? `
 Figures: about half of the cards (at least ${Math.max(1, Math.round(count / 2))} of the ${count}, when the lecture has enough figures) are built on its figures, diagrams, schemas and tables: the front asks what a curve or graph shows, what a labelled part of a diagram is or does, what comes next in a schema, or what a table compares; the back answers it.
@@ -54,12 +58,14 @@ Every card:
 - is different from the other cards: no two cards test the same fact.
 Together, the cards cover the whole lecture, from its first page to its last, not only the beginning.
 "page" is the page the answer comes from.
-${figures}${known ? `
+${figures}${Array.isArray(themes) ? `
+${themesBlock(themes, "card")}
+` : ""}${known ? `
 The student already has the cards below. Write new cards about other facts and ideas of the document; do not repeat or reword any of these:
 ${known}
 ` : ""}
 The reply must be exactly this shape:
-{"cards": [{"front": "...", "back": "...", "page": 1}]}`;
+{"cards": [{"front": "...", "back": "...", "page": 1${Array.isArray(themes) ? `, "themes": [${JSON.stringify(themes[0] || "basic")}]` : ""}}]}`;
 }
 
 // ---- reading the answer
@@ -81,11 +87,12 @@ function card(x, i) {
   const back = str(x.back, `The back of card ${i + 1}`);
   if (!normText(front)) fail(`The front of card ${i + 1} has no words.`);
   if (normText(front) === normText(back)) fail(`${what} has the same text on both sides.`);
-  return { front, back, page: page(x.page, what) };
+  const themes = cleanThemes(x.themes);
+  return { front, back, page: page(x.page, what), ...(themes.length ? { themes } : {}) };
 }
 
 /**
- * → { cards: [{ front, back, page }], skipped: [messages] }. Invalid cards are left out as long
+ * → { cards: [{ front, back, page, themes? }], skipped: [messages] }. Invalid cards are left out as long
  * as at least half of the batch is valid; otherwise it throws a readable Error.
  */
 export function parseCards(text) {
@@ -120,6 +127,7 @@ export function mergeCards(deck, incoming, { date, makeId, max = DECK_MAX }) {
     added.push({
       id: makeId(), front: x.front, back: x.back, page: x.page ?? null, addedAt: date,
       seen: 0, right: 0, lastSeen: null, lastRight: null,
+      ...(cleanThemes(x.themes).length ? { themes: cleanThemes(x.themes) } : {}),
     });
   }
   return { cards: [...deck, ...added], added, duplicates, overflow };
@@ -137,9 +145,11 @@ export function deckOf(notes) {
 /**
  * Chooses the cards of a session: first those never seen and those graded "Not yet" last time,
  * then the least recently seen; ties are broken at random. `size` is a number or "all".
+ * `themes`: the ticked theme keys; only cards with one of them are drawn (matchesThemes).
  * → [card ids] in the order to show them.
  */
-export function pickCards(cards, size, rand = Math.random) {
+export function pickCards(all, size, rand = Math.random, themes = null) {
+  const cards = all.filter(x => matchesThemes(x, themes));
   const n = size === "all" ? cards.length : Math.max(0, Math.min(Number(size) || 0, cards.length));
   const tier = x => (!x.seen || x.lastRight === false ? 0 : 1);
   const chosen = shuffled(cards.length, rand).map(i => cards[i])

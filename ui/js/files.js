@@ -74,9 +74,29 @@ export async function pdfBlob(id) {
   return data instanceof Blob ? data : new Blob([data], { type: "application/pdf" });
 }
 
+// The Blob behind each URL of pdfUrl: the app's CSP does not let fetch read blob: URLs, so the
+// viewer reads the bytes from here.
+const urlBlobs = new Map();
+
 /** A URL the viewer can show. The caller hands it to openViewer, which releases it on close. */
 export async function pdfUrl(id) {
-  return URL.createObjectURL(await pdfBlob(id));
+  const blob = await pdfBlob(id);
+  const url = URL.createObjectURL(blob);
+  urlBlobs.set(url, blob);
+  return url;
+}
+
+/** The bytes behind a URL of pdfUrl (any other URL is fetched). */
+export async function urlBytes(url) {
+  const blob = urlBlobs.get(url);
+  if (!blob) return (await fetch(url)).arrayBuffer();
+  return blob.arrayBuffer ? blob.arrayBuffer() : new Response(blob).arrayBuffer();
+}
+
+/** Forgets a URL of pdfUrl. */
+export function releaseUrl(url) {
+  if (!urlBlobs.delete(url)) return;
+  URL.revokeObjectURL(url);
 }
 
 export async function removePdf(id) {

@@ -9,7 +9,9 @@ import { esc, icon, app, openViewer, confirmBox, cvar, toast, select } from "../
 import { pdfUrl } from "../files.js";
 import {
   runJob, runFicheJob, isRunning, isRunningWithSchemas, setupNeeded, withSchemas, setSchemas, schemasToggle, takesAbout,
+  themeChips, themeTags, checkedThemes, toggleTheme, sortByTheme,
 } from "./notebook-jobs.js";
+import { unclassified } from "../themes-core.js";
 import { cardsTab } from "./notebook-cards.js";
 import { chatTab } from "./notebook-chat.js";
 import {
@@ -34,9 +36,10 @@ const PARALLEL = 3;
  * page: "lecture" (a lecture and its tabs) or "quiz" (the quiz page). sel: the open lecture.
  * open: module groups unfolded in the sidebar. pick: lectures ticked for the next quiz; unfold:
  * module groups unfolded in the quiz chooser. size, level: the next quiz's length and difficulty.
- * prep: while Claude writes the questions a quiz needs, { lectures, size, level, jobs: { id: state } }
- * with state "wait" | "run" | "done" | "fail". play: the quiz being played or just finished,
- * { lectures, size, level, items: [{ lecture, id, order }], i, picks: [stored option index],
+ * prep: while Claude sorts the questions by theme, then writes those the quiz needs, { lectures,
+ * size, level, themes, stage: "sort" | "write", jobs: { id: state } } with state "wait" | "run" |
+ * "done" | "fail". play: the quiz being played or just finished,
+ * { lectures, size, level, themes, items: [{ lecture, id, order }], i, picks: [stored option index],
  *   right: [bool], retry, done, score, total, missed: [items] }.
  */
 const view = {
@@ -157,6 +160,7 @@ function genControls(label, room) {
       ${schemasToggle()}
       <button class="btn ghost" data-act="generate" data-kind="quiz">${icon("spark", 16)} ${label}</button>
     </div>
+    <div class="toolbar nb-themes-row"><span class="small">Themes</span>${themeChips()}</div>
     ${asked < view.genCount ? `<p class="small muted">The bank has room for ${room} more, so Claude writes ${asked}.</p>` : ""}`;
 }
 
@@ -199,7 +203,7 @@ function bankCard(id, z) {
     : `right ${x.right} of ${x.seen} time${x.seen === 1 ? "" : "s"}${x.lastRight === false ? " · missed last time" : ""}`);
   const rows = view.showBank ? `<div class="nb-bank">${z.questions.map(x => `<div class="row">
       <div class="row-main"><span class="t">${esc(x.q)}</span>
-        <span class="sub">${levelTag(x.level)}<span>${stats(x)}</span>${pageTag(x.page)}</span></div>
+        <span class="sub">${levelTag(x.level)}<span>${stats(x)}</span>${pageTag(x.page)}${themeTags(x)}</span></div>
       <button class="iconbtn" data-act="deleteQuestion" data-q="${esc(x.id)}" title="Delete this question" aria-label="Delete this question">${icon("trash", 16)}</button>
     </div>`).join("")}</div>
     <div class="btns"><button class="btn danger small" data-act="clearBank">${icon("trash", 15)} Delete all questions</button></div>` : "";
@@ -237,7 +241,7 @@ function sessionCard(p) {
       <div class="nb-opts">${opts}</div>
       ${answered_ ? `<div class="nb-why ${ok ? "right" : "wrong"}">
           <b>${ok ? "Right!" : `Not quite: the answer is ${LETTERS[item.order.indexOf(x.answer)]}.`}</b>
-          <span>${esc(x.why)}</span>${pageTag(x.page, item.lecture)}
+          <span>${esc(x.why)}</span>${pageTag(x.page, item.lecture)}${themeTags(x)}
         </div>
         <div class="btns end">
           <button class="btn ghost small" data-act="deleteQuestion" data-q="${esc(x.id)}" data-lecture="${esc(item.lecture)}" title="Wrong or unclear? Remove it from the bank">${icon("trash", 15)} Delete this question</button>
@@ -260,7 +264,7 @@ function missedReview(p) {
       <p class="nb-rq">${esc(x.q)}</p>
       <p><span class="muted">Your answer:</span> ${esc(x.options[p.picks[k]])}</p>
       <p><span class="muted">Right answer:</span> <b>${esc(x.options[x.answer])}</b></p>
-      <p class="muted">${esc(x.why)}${pageTag(x.page, m.lecture)}</p>
+      <p class="muted">${esc(x.why)}${pageTag(x.page, m.lecture)}${themeTags(x)}</p>
     </li>`);
 }
 
@@ -301,19 +305,26 @@ function resultCard(p) {
   </section>`;
 }
 
-/** While Claude writes the questions the quiz needs. */
+/** While Claude sorts the questions by theme (stage "sort"), then writes those the quiz needs. */
 function prepCard(prep) {
-  const label = { wait: "Waiting…", run: "Writing questions…", done: "Ready", fail: "Could not write questions" };
+  const sorting = prep.stage === "sort";
+  const label = sorting
+    ? { wait: "Waiting…", run: "Sorting by theme…", done: "Sorted", fail: "Not sorted this time" }
+    : { wait: "Waiting…", run: "Writing questions…", done: "Ready", fail: "Could not write questions" };
   const rows = prep.lectures.map(id => {
     const st = prep.jobs[id] || "done";
     const mark = st === "run" ? '<span class="nb-spin small" aria-hidden="true"></span>' : st === "done" ? icon("check", 15) : st === "fail" ? icon("close", 15) : icon("clock", 15);
     return `<li class="nbq-prep ${st}">${mark}<span class="nbq-t">${esc(srcTitle(id))}</span><small>${prep.jobs[id] ? label[st] : "Ready"}</small></li>`;
   }).join("");
   const n = Object.keys(prep.jobs).length;
+  const intro = sorting
+    ? `<p class="lead">Sorting your questions by theme…</p>
+      <p class="small muted">A quick one-off: Claude tags the questions you already have with their themes, so a quiz only asks those on the themes you chose.</p>`
+    : `<p class="lead">Claude is writing questions for ${srcCount(Object.keys(prep.jobs))}${prep.schemas ? ", reading every diagram" : ""}. The quiz starts by itself when they are ready.</p>
+      <p class="small muted">It takes ${prep.schemas ? "a few minutes" : "about half a minute"} per lecture, a few at a time. You can use the rest of Bloom meanwhile.</p>`;
   return `<section class="card">${quizHead("Getting your quiz ready", lecturesInfo(prep.lectures))}
     <div class="card-b">
-      <p class="lead">Claude is writing questions for ${srcCount(Object.keys(prep.jobs))}${prep.schemas ? ", reading every diagram" : ""}. The quiz starts by itself when they are ready.</p>
-      <p class="small muted">It takes ${prep.schemas ? "a few minutes" : "about half a minute"} per lecture, a few at a time. You can use the rest of Bloom meanwhile.</p>
+      ${intro}
       <ul class="nbq-preps">${rows}</ul>
       <div class="btns end"><button class="btn ghost small" data-act="quizCancel">Cancel</button></div>
     </div>
@@ -385,7 +396,7 @@ function chooserCard(gs) {
     return n ? `<button class="chip" data-act="quizExam" data-date="${e.date}">${icon("cal", 14)} ${esc(fmtWday(e.date))} exam · ${n} module${n === 1 ? "" : "s"}</button>` : "";
   }).join("");
   const picked = pickedLectures(gs);
-  const plan = picked.length ? planQuiz(picked.map(bankFor), view.size, view.level) : [];
+  const plan = picked.length ? planQuiz(picked.map(bankFor), view.size, view.level, checkedThemes()) : [];
   const toMake = plan.filter(p => p.make > 0).length;
   const sizeChips = SIZES.map(k => `<button class="chip ${view.size === k ? "on" : ""}" data-act="quizSize" data-n="${k}" aria-pressed="${view.size === k}">${k}</button>`).join("");
   const levelChips = LEVEL_CHOICES.map(([k, l]) => `<button class="chip ${view.level === k ? "on" : ""}" data-act="quizLevel" data-level="${k}" aria-pressed="${view.level === k}">${l}</button>`).join("");
@@ -400,6 +411,7 @@ function chooserCard(gs) {
       <div class="nbq-list">${pickList(gs)}${ficheList()}</div>
       <div class="toolbar"><span class="small">Questions</span>${sizeChips}</div>
       <div class="toolbar"><span class="small">Difficulty</span>${levelChips}</div>
+      <div class="toolbar nb-themes-row"><span class="small">Themes</span>${themeChips()}</div>
       <div class="toolbar nbq-mode"><span class="small">New questions</span>${schemasToggle()}</div>
       <div class="nbq-go"><p class="small">${summary}</p><span class="grow"></span>
         <button class="btn primary" data-act="quizStart" ${picked.length ? "" : "disabled"}>${icon("todo", 16)} Start the quiz</button></div>
@@ -493,7 +505,7 @@ function promptFor(id, kind, schemas) {
   if (kind === "guide") return guidePrompt(title, { schemas });
   const z = bankOf(id);
   const room = BANK_MAX - (z?.questions.length ?? 0);
-  return quizPrompt(title, { count: Math.min(view.genCount, room), level: view.genLevel, avoid: (z?.questions ?? []).map(x => x.q), schemas });
+  return quizPrompt(title, { count: Math.min(view.genCount, room), level: view.genLevel, avoid: (z?.questions ?? []).map(x => x.q), schemas, themes: checkedThemes() });
 }
 
 /** Adds the questions Claude wrote to lecture `id`'s bank. Returns the message for the toast. */
@@ -541,14 +553,14 @@ const bankFor = id => ({ lecture: id, questions: bankOf(id)?.questions ?? [], qu
 const scrollTop = () => { const main = document.getElementById("main"); if (main) main.scrollTop = 0; };
 
 /**
- * Has Claude write `count` questions at `level` for lecture `id`, quietly, "With schemas" or not.
- * Resolves true when some were added.
+ * Has Claude write `count` questions at `level` on `themes` for lecture `id`, quietly, "With
+ * schemas" or not. Resolves true when some were added.
  */
-function makeQuestions(id, count, level, schemas) {
+function makeQuestions(id, count, level, schemas, themes) {
   const z = bankOf(id);
   const fiche = isFicheSrc(id);
   // a fiche's questions come from its text (fiches-core.js): "With schemas" does not apply
-  const prompt = quizPrompt(srcTitle(id), { count, level, avoid: (z?.questions ?? []).map(x => x.q), schemas: schemas && !fiche });
+  const prompt = quizPrompt(srcTitle(id), { count, level, avoid: (z?.questions ?? []).map(x => x.q), schemas: schemas && !fiche, themes });
   const done = (text, now) => { addQuestions(id, parseQuiz(text), now.title); };
   return fiche ? runFicheJob(id, "quiz", prompt, done) : runJob(id, "quiz", prompt, done, { schemas });
 }
@@ -561,45 +573,65 @@ async function pool(items, n, work) {
   }));
 }
 
-/** Prepares and starts a quiz of `size` questions at `level` over `lectures`. */
-async function startQuiz(lectures, size, level) {
+/**
+ * Prepares and starts a quiz of `size` questions at `level` on `themes` over `lectures`: the
+ * questions not sorted by theme yet are sorted first (one quick run per lecture), then Claude
+ * writes what is missing on those themes.
+ */
+async function startQuiz(lectures, size, level, themes = checkedThemes()) {
   if (!lectures.length || view.prep) return;
-  const todo = planQuiz(lectures.map(bankFor), size, level).filter(p => p.make > 0);
   view.page = "quiz";
   view.play = null;
+  const schemas = withSchemas();
+  const prep = { lectures, size, level, themes, schemas, stage: "sort", jobs: {} };
+  const unsorted = lectures.filter(id => unclassified(bankOf(id)?.questions).length);
+  if (unsorted.length) {
+    prep.jobs = Object.fromEntries(unsorted.map(id => [id, "wait"]));
+    view.prep = prep;
+    app.refresh();
+    await pool(unsorted, PARALLEL, async id => {
+      if (view.prep !== prep) return; // cancelled
+      prep.jobs[id] = "run";
+      app.refresh();
+      // a failed sort does not hold the quiz back: its questions then count for every theme
+      prep.jobs[id] = await sortByTheme(id, "question", () => bankOf(id)?.questions ?? []) ? "done" : "fail";
+      app.refresh();
+    });
+    if (view.prep !== prep) return;
+  }
+  const todo = planQuiz(lectures.map(bankFor), size, level, themes).filter(p => p.make > 0);
   if (todo.length) {
-    const schemas = withSchemas();
-    const prep = { lectures, size, level, schemas, jobs: Object.fromEntries(todo.map(p => [p.lecture, "wait"])) };
+    Object.assign(prep, { stage: "write", jobs: Object.fromEntries(todo.map(p => [p.lecture, "wait"])) });
     view.prep = prep;
     app.refresh();
     await pool(todo, PARALLEL, async p => {
       if (view.prep !== prep) return; // cancelled
       prep.jobs[p.lecture] = "run";
       app.refresh();
-      prep.jobs[p.lecture] = await makeQuestions(p.lecture, p.make, level, schemas) ? "done" : "fail";
+      prep.jobs[p.lecture] = await makeQuestions(p.lecture, p.make, level, schemas, themes) ? "done" : "fail";
       app.refresh();
     });
     if (view.prep !== prep) return;
-    view.prep = null;
     const failed = Object.values(prep.jobs).filter(s => s === "fail").length;
     if (failed) toast(`Claude could not write questions for ${failed} lecture${failed === 1 ? "" : "s"}; the quiz uses what is there.`, "error");
   }
-  begin(lectures, size, level);
+  view.prep = null;
+  begin(lectures, size, level, null, themes);
 }
 
-/** Draws the quiz and starts it; a retry asks `items` again without counting it. */
-function begin(lectures, size, level, items = null) {
+/** Draws the quiz on `themes` and starts it; a retry asks `items` again without counting it. */
+function begin(lectures, size, level, items = null, themes = checkedThemes()) {
   const retry = Boolean(items);
   const live = lectures.filter(srcExists);
-  const chosen = items || drawQuiz(live.map(bankFor), size, level);
+  const chosen = items || drawQuiz(live.map(bankFor), size, level, Math.random, themes);
   if (!chosen.length) {
     view.play = null;
-    toast("There are no questions to ask yet for these lectures.", "error");
+    toast("There are no questions on these themes to ask yet for these lectures.", "error");
     app.refresh();
     return;
   }
   if (!retry) for (const id of new Set(chosen.map(m => m.lecture))) { const z = bankOf(id); if (z) z.quizzes = (z.quizzes || 0) + 1; }
-  view.play = { lectures: live, size, level, items: chosen, i: 0, picks: [], right: [], retry, done: false, score: 0, total: 0, missed: [] };
+  view.play = { lectures: live, size, level, themes, items: chosen, i: 0, picks: [], right: [], retry, done: false, score: 0, total: 0, missed: [] };
   view.page = "quiz";
   save();
   app.refresh();
@@ -708,6 +740,11 @@ export const actions = {
   genLevel: el => { view.genLevel = el.value; },
   // "Standard | With schemas", wherever it is shown (study guide, quiz, flashcards): one remembered choice
   nbSchemas: el => { setSchemas(el.dataset.on === "1"); app.refresh(); },
+  // the theme chips, wherever they are shown (quiz page, a lecture's Quiz tab, flashcards): one choice for all
+  nbTheme: el => {
+    if (!toggleTheme(el.dataset.theme)) { toast("Keep at least one theme ticked."); return; }
+    app.refresh();
+  },
   generate: async el => {
     const id = view.sel, kind = el.dataset.kind;
     if (isRunning(id, kind)) return;
@@ -718,13 +755,13 @@ export const actions = {
   },
   openPdf: async () => {
     const it = D.items[view.sel];
-    try { openViewer(it.title, await pdfUrl(it.pdf.id)); }
+    try { openViewer(it.title, await pdfUrl(it.pdf.id), null, { notes: view.sel }); }
     catch { toast("This PDF could not be opened. Attach it again from the lecture.", "error"); }
   },
   openPage: async el => {
     const src = el.dataset.lecture || view.sel;
     const it = isFicheSrc(src) ? srcFiche(src) : D.items[src];
-    try { openViewer(it.title, await pdfUrl(it.pdf.id), Number(el.dataset.page)); }
+    try { openViewer(it.title, await pdfUrl(it.pdf.id), Number(el.dataset.page), { notes: src }); }
     catch { toast("This PDF could not be opened. Attach it again from the lecture.", "error"); }
   },
   // the quiz page
@@ -762,14 +799,14 @@ export const actions = {
   quizSize: el => { view.size = Number(el.dataset.n) || 10; app.refresh(); },
   quizLevel: el => { view.level = el.dataset.level; app.refresh(); },
   quizStart: () => startQuiz(pickedLectures(), view.size, view.level),
-  quizAgain: () => { const p = view.play; if (p) startQuiz(p.lectures.filter(srcQuizzable), p.size, p.level); },
+  quizAgain: () => { const p = view.play; if (p) startQuiz(p.lectures.filter(srcQuizzable), p.size, p.level, p.themes || checkedThemes()); },
   quizNew: () => { view.play = null; app.refresh(); },
   quizCancel: () => { view.prep = null; app.refresh(); }, // what Claude is writing still goes into the banks
   retryMissed: () => {
     const p = activePlay();
     if (!p?.done) return;
     const left = p.missed.filter(m => qOf(m));
-    begin(p.lectures, left.length, p.level, shuffled(left.length).map(k => ({ lecture: left[k].lecture, id: left[k].id, order: shuffled(4) })));
+    begin(p.lectures, left.length, p.level, shuffled(left.length).map(k => ({ lecture: left[k].lecture, id: left[k].id, order: shuffled(4) })), p.themes);
   },
   pick: el => choose(Number(el.dataset.k)),
   next,

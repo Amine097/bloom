@@ -128,8 +128,26 @@ The updater signing key is in `~/.tauri/bloom.key` (never commit it) and in the 
   as the source `"fiche:<id>"` (`ui/js/sources.js`). Claude writes its questions from its text, one
   window of pages at a time (`ficheWindow`, `ficheQuizPrompt` in `fiches-core.js`), the next window
   next time; "With schemas" does not apply to fiches.
-- Backgrounds (`settings.background`): "alternate" (default: meadow and cherry blossoms swap every
-  two hours, `ui/js/background.js`), "nature", "blossom", "plain"; each has a matching sidebar.
+- PDFs open in Bloom's own viewer (`openViewer(title, url, page, { notes })` in `ui/js/ui.js`,
+  `ui/js/viewer.js`), built on pdf.js 3.3.122 legacy (the last built for Safari 14 / macOS 11),
+  vendored in `ui/vendor/pdfjs/`: pages drawn lazily, text layer, zoom, page counter. The bytes are
+  read through `files.js` (`urlBytes`), as the CSP blocks `fetch` on blob URLs.
+- Notes per slide: `D.slideNotes[src][page] = { text, at }` (v7), `src` being the quiz source (lecture
+  id or `"fiche:<id>"`); logic in `ui/js/slidenotes-core.js`. The viewer's panel saves as she types;
+  clearing the text deletes the note. Deleting a lecture or fiche deletes its notes; replacing the PDF
+  keeps them. Nothing else reads them.
+- Themes (`ui/js/themes-core.js`): 8 keys (basic, molecular, pathology, clinical, epidemiology,
+  pharmacology, trials, modelling), chips shared by the quiz and the flashcards; view state, with
+  basic, molecular, pathology and pharmacology ticked at each start. Every quiz, card and fiche-quiz
+  prompt lists the ticked themes and the others, and asks `themes: [keys]` on each item; quizzes and
+  review sessions draw only items with a ticked theme. Items without `themes` are classified once,
+  text only, when the bank or deck is next used (`sortByTheme` in `views/notebook-jobs.js`); if that
+  fails they match any theme and the next use retries.
+- Backgrounds (`settings.background`): "alternate" (default) follows the sun over Bern (`PLACE`,
+  `sunEvents` in `ui/js/background.js`, no network): the ocean (`ui/js/scene-ocean.js`) from sunset
+  to sunrise, and by day the meadow and the cherry blossoms swapping every two hours; the timer also
+  wakes at sunrise and sunset. Fixed choices: "nature", "blossom", "ocean", "plain"; each has a
+  matching sidebar. Unknown values fall back to the meadow.
 - Assistants: Claude Code first; Codex (OpenAI's CLI, her ChatGPT account) is the backup while
   Claude's usage limit lasts or when Claude is not set up (`ui/js/assistant-core.js`). The native
   shell has the same commands for both (`ask_*`, `*_status`, `*_install`, `*_login`, ...).

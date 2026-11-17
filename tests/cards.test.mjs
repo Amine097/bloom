@@ -149,3 +149,28 @@ test("cardsPrompt with schemas asks for cards on the figures, with the figure an
   assert.ok(deep.includes(LOOK_LINE) && deep.includes("at least 5 of the 10") && deep.includes("p. 12)"));
   assert.ok(deep.includes(PDF_TOKEN) && deep.trimEnd().endsWith('"page": 1}]}'));
 });
+
+test("cardsPrompt with themes lists those to write on and those to leave out, and asks for themes", () => {
+  const p = cardsPrompt("Heart", { count: 10, themes: ["basic", "pharmacology"] });
+  assert.match(p, /Write cards only on these themes/);
+  assert.match(p, /Do not write cards on these themes/);
+  assert.match(p, /"themes": \["basic"\]/);
+  assert.ok(!cardsPrompt("Heart").includes("themes"));
+});
+
+test("parseCards and mergeCards keep valid theme keys only", () => {
+  const { cards } = parseCards(reply([card({ themes: ["Clinical", "astrology"] }), card({ front: "Plateau", themes: "nope" })]));
+  assert.deepEqual(cards[0].themes, ["clinical"]);
+  assert.ok(!("themes" in cards[1]));
+  let n = 0;
+  const m = mergeCards([], cards, { date: "2026-11-17", makeId: () => `c${++n}` });
+  assert.deepEqual(m.added[0].themes, ["clinical"]);
+  assert.ok(!("themes" in m.added[1]));
+});
+
+test("pickCards only draws cards with a ticked theme; unsorted cards count for any", () => {
+  const deck = [{ id: "a", themes: ["basic"] }, { id: "b", themes: ["trials"] }, { id: "c" }];
+  assert.deepEqual(pickCards(deck, "all", () => 0.3, ["basic"]).sort(), ["a", "c"]);
+  assert.deepEqual(pickCards(deck, 10, () => 0.3, ["trials"]).sort(), ["b", "c"]);
+  assert.equal(pickCards(deck, "all", () => 0.3).length, 3);
+});

@@ -3,6 +3,7 @@
 // Mac is set to reduce motion. Everything is drawn here, so there are no image files to ship.
 
 import { mountBlossom } from "./scene-blossom.js";
+import { mountOcean } from "./scene-ocean.js";
 
 const rand = (a, b) => a + Math.random() * (b - a);
 
@@ -87,10 +88,10 @@ function mountMeadow(layer, count = 7) {
   return () => style.remove();
 }
 
-const SCENES = { nature: mountMeadow, blossom: mountBlossom };
+const SCENES = { nature: mountMeadow, blossom: mountBlossom, ocean: mountOcean };
 let shown = null; // { bg, layer, undo }
 
-/** Show the backdrop for `bg` ("nature", "blossom" or "plain"). Switching needs no reload: the
+/** Show the backdrop for `bg` ("nature", "blossom", "ocean" or "plain"). Switching needs no reload: the
  *  old scene fades out and is removed with its styles, the new one fades in. Calling it again
  *  with the scene already shown does nothing, so it is safe on every refresh. */
 export function mountScene(bg = document.documentElement.dataset.bg) {

@@ -337,3 +337,22 @@ test("with schemas, the prompts also build on the figures; standard ones do not 
   assert.deepEqual(askTimeout(false), { ms: 5 * 60 * 1000, words: "5 minutes" });
   assert.deepEqual(askTimeout(true), { ms: 20 * 60 * 1000, words: "20 minutes" });
 });
+
+test("quizPrompt with themes: checked ones to write on, unchecked ones to leave out, themes in the reply", () => {
+  const p = quizPrompt("Heart", { count: 5, themes: ["trials"] });
+  assert.match(p, /Write questions only on these themes/);
+  assert.match(p, /- "trials" \(Clinical trials & research\)/);
+  assert.match(p, /Do not write questions on these themes[\s\S]*- "basic" \(Basic sciences\)/);
+  assert.match(p, /"themes": \["trials"\]\}\]\}$/);
+  assert.ok(!quizPrompt("Heart").includes("themes"));
+});
+
+test("parseQuiz and mergeQuestions keep valid theme keys only", () => {
+  const { questions } = parseQuiz(JSON.stringify({ questions: [question({ themes: ["Pharmacology", "basic", "x"] }), question({ q: "Other?", themes: [] })] }));
+  assert.deepEqual(questions[0].themes, ["basic", "pharmacology"]);
+  assert.ok(!("themes" in questions[1]));
+  let n = 0;
+  const m = mergeQuestions([], questions, { date: "2026-11-17", makeId: () => `q${++n}` });
+  assert.deepEqual(m.added[0].themes, ["basic", "pharmacology"]);
+  assert.ok(!("themes" in m.added[1]));
+});

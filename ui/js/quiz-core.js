@@ -11,6 +11,7 @@
 //              GAPS[streak - 1] quizzes (3 after one right answer, 6 after two in a row, then 12);
 //   "resting"  otherwise. Resting questions are only used when nothing else is left.
 import { shuffled, LEVELS, BANK_MAX } from "./notebook-core.js";
+import { matchesThemes } from "./themes-core.js";
 
 export const SIZES = [5, 10, 20, 30];
 export const GAPS = [3, 6, 12];
@@ -30,7 +31,8 @@ export function standing(q, quizzes = 0) {
 }
 
 const TIER = { missed: 0, new: 1, due: 2, resting: 3 };
-const fits = (q, level) => !LEVELS.includes(level) || q.level === level;
+/** Whether `q` suits the chosen `level` and has one of the ticked `themes` (null: any). */
+const fits = (q, level, themes) => (!LEVELS.includes(level) || q.level === level) && matchesThemes(q, themes);
 
 /** `size` split between `n` lectures as evenly as possible, the first ones taking the remainder. */
 export function share(size, n) {
@@ -40,11 +42,11 @@ export function share(size, n) {
 }
 
 /** The questions of one bank a quiz may ask, best first: missed, new, due, then resting. */
-function queue(bank, level, rand, withResting) {
+function queue(bank, level, rand, withResting, themes = null) {
   const quizzes = bank.quizzes || 0;
   return shuffled((bank.questions || []).length, rand)
     .map(i => bank.questions[i])
-    .filter(q => fits(q, level))
+    .filter(q => fits(q, level, themes))
     .map((q, k) => ({ q, k, t: TIER[standing(q, quizzes)] }))
     .filter(r => withResting || r.t < TIER.resting)
     .sort((a, b) => a.t - b.t || (a.q.lastSeen || "").localeCompare(b.q.lastSeen || "") || a.k - b.k)
@@ -56,12 +58,13 @@ function queue(bank, level, rand, withResting) {
  * ([{ lecture, questions, quizzes }]) needs. Per lecture: `want` (its share), `ready` (questions it
  * can ask that are not resting) and `make` (how many to ask Claude for first: 0 when it has
  * enough, otherwise the shortfall plus SPARE, between GEN_MIN and GEN_MAX, within the room left in
- * the bank). → [{ lecture, want, ready, make }]
+ * the bank). `themes`: the ticked theme keys (themes-core.js), null for any: only questions with
+ * one of them count, so Claude writes more when a theme is thin. → [{ lecture, want, ready, make }]
  */
-export function planQuiz(banks, size, level) {
+export function planQuiz(banks, size, level, themes = null) {
   const wants = share(size, banks.length);
   return banks.map((b, i) => {
-    const ready = queue(b, level, () => 0.5, false).length;
+    const ready = queue(b, level, () => 0.5, false, themes).length;
     const short = wants[i] - ready;
     const room = BANK_MAX - (b.questions || []).length;
     const make = short > 0 ? Math.max(0, Math.min(room, GEN_MAX, Math.max(GEN_MIN, short + SPARE))) : 0;
@@ -74,10 +77,11 @@ export function planQuiz(banks, size, level) {
  * the places left are filled from any lecture, then with resting questions. A lecture with too few
  * questions does not shorten the quiz while others have more. → [{ lecture, id, order }] in the
  * order to ask them; `order[k]` is the stored index of the option shown at position k.
+ * `themes`: the ticked theme keys, null for any: only questions with one of them are asked.
  */
-export function drawQuiz(banks, size, level, rand = Math.random) {
+export function drawQuiz(banks, size, level, rand = Math.random, themes = null) {
   const wants = share(size, banks.length);
-  const lists = banks.map((b, i) => ({ lecture: b.lecture, want: wants[i], q: queue(b, level, rand, true), quizzes: b.quizzes || 0 }));
+  const lists = banks.map((b, i) => ({ lecture: b.lecture, want: wants[i], q: queue(b, level, rand, true, themes), quizzes: b.quizzes || 0 }));
   const chosen = [];
   const take = (l, ok) => {
     const at = l.q.findIndex(ok);

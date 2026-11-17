@@ -1,5 +1,6 @@
 // Notebook logic that does not touch the screen: the prompts sent to Claude Code, and the
 // parsers that turn its answers into study guides and quizzes. Pure, covered by tests/.
+import { themesBlock, cleanThemes } from "./themes-core.js";
 
 /** The command line, shared by the dev preview server. The native shell (lib.rs) uses the same flags. */
 export const CLAUDE_ARGS = ["-p", "--output-format", "json", "--no-session-persistence", "--strict-mcp-config", "--allowedTools", "Read", "--max-turns", "8", "--effort", "low"];
@@ -62,7 +63,7 @@ The reply must be exactly this shape:
 //   questions: [{ id, q, options: [4 strings], answer: 0..3 (index in the stored options),
 //                 why, page: n | null, level: "recall" | "understanding" | "application" | null,
 //                 addedAt: "YYYY-MM-DD", seen: n, right: n, lastSeen: "YYYY-MM-DD" | null,
-//                 lastRight: true | false | null }],
+//                 lastRight: true | false | null, themes?: [keys of themes-core.js] }],
 //   best: { score, total, date } | null,        best finished session (by share of right answers)
 //   sessions: [{ date, score, total }],         the last SESSIONS_KEPT finished sessions, oldest first
 // }
@@ -81,9 +82,10 @@ const LEVEL_TEXT = {
 /**
  * `count` questions at `level` ("mixed" or one of LEVELS). `avoid` lists the texts of the
  * questions already in the bank, which Claude must not repeat. `schemas`: about half of the
- * questions are built on the figures (see LOOK_LINE).
+ * questions are built on the figures (see LOOK_LINE). `themes`: the theme keys she ticked
+ * (themes-core.js); Claude writes only on those and tags every question. null: no themes asked.
  */
-export function quizPrompt(title, { count = 10, level = "mixed", avoid = [], schemas = false } = {}) {
+export function quizPrompt(title, { count = 10, level = "mixed", avoid = [], schemas = false, themes = null } = {}) {
   const mix = LEVELS.includes(level)
     ? `Every question is at the "${level}" level.`
     : "Mix the three levels, roughly a third each.";
@@ -112,12 +114,14 @@ Every question:
 "answer" is the index (0 to 3) of the correct option; vary its position across questions.
 "level" is "recall", "understanding" or "application".
 "why" explains in one or two sentences why the correct option is right. "page" is the page the answer comes from.
-${figures}${known ? `
+${figures}${Array.isArray(themes) ? `
+${themesBlock(themes, "question")}
+` : ""}${known ? `
 The student already has the questions below. Write new questions about other facts and ideas of the document; do not repeat or reword any of these:
 ${known}
 ` : ""}
 The reply must be exactly this shape:
-{"questions": [{"q": "...", "options": ["...", "...", "...", "..."], "answer": 0, "level": "recall", "why": "...", "page": 1}]}`;
+{"questions": [{"q": "...", "options": ["...", "...", "...", "..."], "answer": 0, "level": "recall", "why": "...", "page": 1${Array.isArray(themes) ? `, "themes": [${JSON.stringify(themes[0] || "basic")}]` : ""}}]}`;
 }
 
 // ---- reading the answers
@@ -190,11 +194,13 @@ function question(x, i) {
   if (!Number.isInteger(answer) || answer < 0 || answer > 3) fail(`${what} does not say which option is correct.`);
   const level = typeof x.level === "string" ? x.level.trim().toLowerCase() : "";
   if (!LEVELS.includes(level)) fail(`${what} does not say whether it is recall, understanding or application.`);
-  return { q, options, answer, level, why: str(x.why, `The explanation of question ${i + 1}`), page: page(x.page, what) };
+  const themes = cleanThemes(x.themes);
+  return { q, options, answer, level, why: str(x.why, `The explanation of question ${i + 1}`), page: page(x.page, what), ...(themes.length ? { themes } : {}) };
 }
 
 /**
- * → { questions: [{ q, options: [4 strings], answer: 0..3, level, why, page }], skipped: [messages] }.
+ * → { questions: [{ q, options: [4 strings], answer: 0..3, level, why, page, themes? }], skipped: [messages] }.
+ * `themes` (valid keys only) is there when Claude gave at least one valid key.
  * Invalid questions are left out as long as at least half of the batch is valid; otherwise it
  * throws a readable Error.
  */
@@ -231,6 +237,7 @@ export function mergeQuestions(bank, incoming, { date, makeId, max = BANK_MAX })
       id: makeId(), q: x.q, options: [...x.options], answer: x.answer, why: x.why, page: x.page ?? null,
       level: LEVELS.includes(x.level) ? x.level : null, addedAt: date,
       seen: 0, right: 0, lastSeen: null, lastRight: null,
+      ...(cleanThemes(x.themes).length ? { themes: cleanThemes(x.themes) } : {}),
     });
   }
   return { questions: [...bank, ...added], added, duplicates, overflow };

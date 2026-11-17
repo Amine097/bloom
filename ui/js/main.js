@@ -42,8 +42,8 @@ function applyTheme() {
   applyBackground();
 }
 
-/** Show the backdrop the setting asks for now; with "Change every 2 hours", also set a timer for
- *  the next two-hour boundary, so the scene changes by itself while Bloom stays open. */
+/** Show the backdrop the setting asks for now; with "alternate", also set a timer for
+ *  the next switch (sunrise, sunset or a two-hour mark), so the scene changes by itself while Bloom stays open. */
 let bgTimer = 0;
 function applyBackground() {
   const bg = backgroundAt(D.settings.background, new Date());
