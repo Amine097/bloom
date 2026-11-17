@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   normUrl, jellyfinAuth, watchState, libraryCard, filterLibrary, stateCounts, continueList, bySeason,
-  jellyfinImage, jellyfinWebUrl, tmdbIndex, mediaStatus, downloadPct, seerrCard, isTitle,
+  jellyfinImage, episodeToPlay, tmdbIndex, mediaStatus, downloadPct, seerrCard, isTitle,
   requestableSeasons, requestBody, requestRow, seasonsLabel, mediaError, needsAutoConnect, readBuiltIn, looseObject,
 } from "../ui/js/media-core.js";
 
@@ -87,7 +87,6 @@ test("bySeason: episodes grouped and ordered, specials last", () => {
 
 test("Jellyfin links", () => {
   assert.equal(jellyfinImage("http://h:8096", "abc", "t 1", 300), "http://h:8096/Items/abc/Images/Primary?fillHeight=300&quality=85&tag=t%201");
-  assert.equal(jellyfinWebUrl("http://h:8096", "abc", "srv"), "http://h:8096/web/#/details?id=abc&serverId=srv");
   const idx = tmdbIndex([libraryCard(movie()), libraryCard(series()), libraryCard(episode())]);
   assert.equal(idx.get("movie:329865").id, "m1");
   assert.equal(idx.get("tv:95396").id, "s1");
@@ -184,4 +183,19 @@ test("readBuiltIn forgives what copy and paste does to the secret", () => {
   assert.deepEqual(readBuiltIn("jellyfin=http://10.0.0.1:8096\nseerr=http://10.0.0.1:5055\nuser=her"), want);
   assert.deepEqual(readBuiltIn("{jellyfin: http://10.0.0.1:8096, seerr: http://10.0.0.1:5055, user: her}"), want);
   assert.equal(looseObject("   "), null);
+});
+
+test("episodeToPlay: the one she is in, else the first not watched, else the first", () => {
+  const ep = (id, state) => ({ id, state });
+  const seasons = st => [{ number: 1, episodes: st.slice(0, 2).map((x, i) => ep(`1-${i}`, x)) }, { number: 2, episodes: st.slice(2).map((x, i) => ep(`2-${i}`, x)) }];
+  assert.equal(episodeToPlay(seasons(["watched", "watched", "new", "started"])).id, "2-1");
+  assert.equal(episodeToPlay(seasons(["watched", "new", "new"])).id, "1-1");
+  assert.equal(episodeToPlay(seasons(["watched", "watched", "watched"])).id, "1-0");
+  assert.equal(episodeToPlay([]), null);
+});
+
+test("libraryCard keeps where she stopped, for Play", () => {
+  assert.equal(libraryCard(movie({ UserData: { PlaybackPositionTicks: 123 } })).position, 123);
+  assert.equal(libraryCard(movie()).position, 0);
+  assert.equal(bySeason([episode({ UserData: { PlaybackPositionTicks: 9 } })])[0].episodes[0].position, 9);
 });

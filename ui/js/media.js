@@ -1,5 +1,5 @@
 // Movies & series: talking to her Jellyfin and Jellyseerr. In the app every request goes through
-// the native shell (media_fetch, media_image, open_url in src-tauri/src/lib.rs); in the browser
+// the native shell (media_fetch, media_image, open_jellyfin_app in src-tauri/src/lib.rs); in the browser
 // preview through scripts/preview.mjs (/api/media, /api/media-image). Pure logic: media-core.js.
 import { D, save, uid } from "./store.js";
 import { jellyfinAuth, requestBody } from "./media-core.js";
@@ -61,20 +61,20 @@ async function jellyfinLogin(base, user, password, deviceId) {
   return { token: data.AccessToken, userId: data.User.Id, serverId: data.ServerId || data.User.ServerId || "", user: data.User.Name || user };
 }
 
-/** GET on Jellyfin with her session; signs in again once if the session was dropped. */
-async function jf(path, params = {}) {
+/** A request to Jellyfin with her session (GET unless `method`); signs in again once if the session was dropped. */
+async function jf(path, params = {}, method = "GET") {
   const c = cfg();
   const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null && v !== "")).toString();
   const url = `${c.jellyfin}${path}${qs ? `?${qs}` : ""}`;
   for (let attempt = 0; ; attempt++) {
     const auth = jellyfinAuth(c.deviceId, c.token);
-    const r = await http("GET", url, { headers: { Authorization: auth, "X-Emby-Authorization": auth } });
+    const r = await http(method, url, { headers: { Authorization: auth, "X-Emby-Authorization": auth } });
     if (r.status === 401 && attempt === 0) {
       Object.assign(c, await jellyfinLogin(c.jellyfin, c.user, c.password, c.deviceId));
       save();
       continue;
     }
-    if (r.status !== 200) throw failed(r, "Jellyfin");
+    if (r.status < 200 || r.status >= 300) throw failed(r, "Jellyfin");
     return parse(r);
   }
 }
@@ -244,8 +244,55 @@ export function loadImage(url) {
   return p;
 }
 
-/** Opens a link in her browser. */
-export async function openLink(url) {
-  if (tauri) return tauri.core.invoke("open_url", { url });
-  window.open(url, "_blank", "noopener");
+// ---- Play: her Jellyfin app (Jellyfin Media Player, or Jellyfin Desktop) is started, then told
+// through the server to play, as Jellyfin's own "play on" remote control does.
+
+const DESKTOP_APP = /jellyfin (media player|desktop)/i;
+const APP_WAIT_MS = 30_000;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/** Her Jellyfin app's session on the server, the most recently active; null when it is not running. */
+async function appSession() {
+  const c = cfg();
+  const list = await jf("/Sessions", { controllableByUserId: c.userId });
+  return (Array.isArray(list) ? list : [])
+    .filter(s => DESKTOP_APP.test(s.Client || "") && s.SupportsRemoteControl !== false)
+    .sort((a, b) => String(b.LastActivityDate || "").localeCompare(String(a.LastActivityDate || "")))[0] || null;
+}
+
+/**
+ * Plays `itemId` (a film or an episode) in her Jellyfin app from `position` (ticks; 0 = the start),
+ * opening the app first. Throws MediaError("no-app") when it is not on this Mac, ("no-session")
+ * when it did not show up on the server in time.
+ */
+export async function playInApp(itemId, position = 0) {
+  if (tauri) {
+    try { await tauri.core.invoke("open_jellyfin_app"); }
+    catch (e) { throw new MediaError("no-app", e?.message || String(e)); }
+  }
+  let s = await appSession();
+  for (const until = Date.now() + APP_WAIT_MS; !s && Date.now() < until;) {
+    await sleep(1500);
+    s = await appSession();
+  }
+  if (!s) throw new MediaError("no-session");
+  await jf(`/Sessions/${encodeURIComponent(s.Id)}/Playing`, {
+    playCommand: "PlayNow", itemIds: itemId, startPositionTicks: position > 0 ? Math.floor(position) : "",
+  }, "POST");
+}
+
+// ---- For you: TMDB's recommendations for a title, through Jellyseerr
+
+export async function recommendations(type, tmdb) {
+  const data = await seerr("GET", `/${type === "tv" ? "tv" : "movie"}/${encodeURIComponent(tmdb)}/recommendations?page=1&language=en`);
+  return data?.results || [];
+}
+
+/** The best match for a title Claude suggested; null when Jellyseerr does not know it. */
+export async function findTitle(title, year, type) {
+  const data = await seerr("GET", `/search?query=${enc(title)}&page=1&language=en`);
+  const list = (data?.results || []).filter(r => r.mediaType === (type === "tv" ? "tv" : "movie"));
+  const y = Number(year) || 0;
+  const near = r => Math.abs(Number(String(r.releaseDate || r.firstAirDate || "").slice(0, 4)) - y) <= 1;
+  return (y ? list.find(near) : null) || list[0] || null;
 }

@@ -1,2 +1,2 @@
-• New Movies page: your films and series from Jellyfin, with what you have watched, what you have started and how far you got. Play opens Jellyfin.
-• Find new films and series and ask for them right from Bloom, then follow your requests until they are ready to watch.
+• Play now opens your Jellyfin app and starts the film right where you stopped, or a series at the episode you are on. You can also pick any episode from the list.
+• New "For you" tab in Movies: Claude suggests films and series like the ones you finished, with a line on why. You get new ones each time you open Bloom, "Propose more" adds others, and the cross hides one you do not want.

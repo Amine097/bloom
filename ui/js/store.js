@@ -4,6 +4,7 @@ import { nextRecall, stateOf } from "./recall.js";
 import { seedData } from "./seed.js";
 import { migrateQuiz } from "./notebook-core.js";
 import { migrateBank } from "./quiz-core.js";
+import { emptyPicks } from "./picks-core.js";
 
 const KEY = "bloom_data";
 const tauri = window.__TAURI__;
@@ -59,7 +60,11 @@ function migrate(data) {
   // quiz source then PDF page like D.slideNotes: { [src]: { [page]: [mark] } }; mark shape at the
   // top of ui/js/marks-core.js. Nothing to convert.
   data.pdfMarks ??= {};
-  data.version = 8;
+  // v9: D.mediaPicks holds the Movies page's "For you" suggestions (shape at the top of
+  // ui/js/picks-core.js). D.settings.media, the connection to her Jellyfin, is read with defaults.
+  if (!data.mediaPicks || typeof data.mediaPicks !== "object") data.mediaPicks = emptyPicks();
+  for (const k of ["items", "shown", "dismissed"]) if (!Array.isArray(data.mediaPicks[k])) data.mediaPicks[k] = [];
+  data.version = 9;
   return data;
 }
 

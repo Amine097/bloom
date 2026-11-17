@@ -1157,12 +1157,27 @@ input[type="file"]::file-selector-button { font: inherit; font-weight: 700; colo
 .mv-season { background: var(--surface-2); border-radius: 14px; padding: 9px 14px; margin-bottom: 8px; }
 .mv-season summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; }
 .mv-eps { list-style: none; margin: 8px 0 2px; padding: 0; display: grid; gap: 4px; }
-.mv-eps li { display: flex; align-items: center; gap: 10px; font-size: 13.5px; min-height: 24px; }
+.mv-eps li { font-size: 13.5px; }
+.mv-ep { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 28px; padding: 2px 6px; border-radius: 9px; }
+.mv-ep:hover { background: var(--surface); }
+.mv-ep:disabled { opacity: .7; }
+.mv-ep-play { color: var(--accent-ink); opacity: 0; display: grid; flex: none; }
+.mv-ep:hover .mv-ep-play, .mv-ep:focus-visible .mv-ep-play { opacity: 1; }
 .mv-eps li.watched .mv-ep-t { color: var(--muted); }
 .mv-ep-n { width: 22px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
 .mv-ep-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mv-ep-p { font-size: 12px; font-weight: 700; color: var(--accent-ink); }
 .mv-pick { display: grid; gap: 8px; }
 .mv-seasons-pick { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+/* For you */
+.mv-fy-h { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+.mv-fy-h .mv-h { margin: 0 0 2px; }
+.mv-working { margin-bottom: 16px; }
+.mv-note { margin: -6px 0 14px; }
+.mv-pick { position: relative; display: grid; align-content: start; gap: 4px; min-width: 0; }
+.mv-why { font-size: 12.5px; line-height: 1.4; color: var(--ink); opacity: .82; }
+.mv-x { position: absolute; top: 7px; right: 7px; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: rgba(30, 16, 26, .62); color: #fff; opacity: 0; transition: opacity .15s; }
+.mv-pick:hover .mv-x, .mv-x:focus-visible { opacity: 1; }
+@media (hover: none) { .mv-x { opacity: 1; } }
 @media (max-width: 700px) { .mv-detail { grid-template-columns: minmax(0, 1fr); } .mv-poster.big { width: 160px; } }
 @media (prefers-reduced-motion: reduce) { .mv-poster { transition: none; } }

@@ -58,6 +58,7 @@ export function libraryCard(item) {
       ? Math.max(1, Math.round((item.RunTimeTicks - (item.UserData?.PlaybackPositionTicks || 0)) / TICKS_PER_MIN)) : null,
     unplayed: type === "series" ? item.UserData?.UnplayedItemCount ?? null : null,
     state, pct,
+    position: Number(item.UserData?.PlaybackPositionTicks) || 0,
     tmdb: tmdb ? String(tmdb) : null,
     // the poster: an episode shows its series'
     imageId: type === "episode" ? (item.SeriesId || item.Id) : item.Id,
@@ -115,13 +116,22 @@ export function continueList(resume, nextUp, max = 12) {
   return out;
 }
 
+/**
+ * The episode Play starts for a series: the one she is in the middle of, else the first she has
+ * not watched (specials last), else the very first. null when there are none. `seasons`: bySeason().
+ */
+export function episodeToPlay(seasons) {
+  const all = seasons.flatMap(s => s.episodes);
+  return all.find(e => e.state === "started") || all.find(e => e.state === "new") || all[0] || null;
+}
+
 /** Episodes grouped by season, for a series' details. */
 export function bySeason(episodes) {
   const seasons = new Map();
   for (const ep of episodes) {
     const n = ep.ParentIndexNumber ?? 0;
     if (!seasons.has(n)) seasons.set(n, { number: n, name: ep.SeasonName || (n ? `Season ${n}` : "Specials"), episodes: [] });
-    seasons.get(n).episodes.push({ id: ep.Id, number: ep.IndexNumber ?? null, name: ep.Name || "", ...watchState(ep) });
+    seasons.get(n).episodes.push({ id: ep.Id, number: ep.IndexNumber ?? null, name: ep.Name || "", position: Number(ep.UserData?.PlaybackPositionTicks) || 0, ...watchState(ep) });
   }
   return [...seasons.values()].sort((a, b) => (a.number || 999) - (b.number || 999));
 }
@@ -129,9 +139,6 @@ export function bySeason(episodes) {
 export const jellyfinImage = (base, id, tag, height = 330) =>
   `${base}/Items/${encodeURIComponent(id)}/Images/Primary?fillHeight=${height}&quality=85${tag ? `&tag=${encodeURIComponent(tag)}` : ""}`;
 
-/** The page of a film or series in Jellyfin's web app, where Play is. */
-export const jellyfinWebUrl = (base, id, serverId) =>
-  `${base}/web/#/details?id=${encodeURIComponent(id)}${serverId ? `&serverId=${encodeURIComponent(serverId)}` : ""}`;
 
 /** "movie:603" / "tv:1399" → the Jellyfin card, to show Play on what is already there. */
 export function tmdbIndex(cards) {
@@ -278,5 +285,7 @@ export function mediaError(e, what = "your library") {
   if (code === "unreachable") return `Bloom cannot reach ${what}. Is Tailscale on?`;
   if (code === "auth") return "Jellyfin did not accept the username or password.";
   if (code === "seerr-auth") return "Jellyseerr did not accept the sign-in.";
+  if (code === "no-app") return "The Jellyfin app is not on this Mac.";
+  if (code === "no-session") return "The Jellyfin app did not answer. Make sure it is open and signed in, then try again.";
   return e?.message || String(e);
 }

@@ -1,14 +1,21 @@
-// Movies & series: her Jellyfin library (what she watched, started, not touched yet) and, through
-// Jellyseerr, films and series to ask for. Play opens Jellyfin in her browser; Bloom has no player.
-// Requests: media.js. Pure logic: media-core.js.
-import { fmtDay } from "../dates.js";
-import { esc, icon, app, toast, openModal, field, input, $ } from "../ui.js";
+// Movies & series: her Jellyfin library (what she watched, started, not touched yet), "For you"
+// (suggestions from what she finished, picks-core.js) and, through Jellyseerr, films and series to ask
+// for. Play starts her Jellyfin app and has it play; Bloom has no player.
+// Requests: media.js. Pure logic: media-core.js, picks-core.js.
+import { D, save } from "../store.js";
+import { fmtDay, today } from "../dates.js";
+import { esc, icon, app, toast, openModal, closeModal, field, input, $ } from "../ui.js";
 import * as media from "../media.js";
+import { askAssistant } from "../assistant.js";
 import {
-  normUrl, libraryCard, filterLibrary, stateCounts, continueList, bySeason, jellyfinImage, jellyfinWebUrl,
+  normUrl, libraryCard, filterLibrary, stateCounts, continueList, bySeason, episodeToPlay, jellyfinImage,
   tmdbIndex, seerrCard, isTitle, requestableSeasons, requestRow, seasonsLabel, mediaError, needsAutoConnect,
   STATES, KINDS,
 } from "../media-core.js";
+import {
+  PICKS, MORE, seedsFrom, tasteOf, rankCandidates, picksPrompt, parsePicks, algoPicks, toPick, keepBatch, dismiss,
+  autoDue, keyOf, genreNames,
+} from "../picks-core.js";
 
 const view = { tab: "library", kind: "all", state: "all", query: "", sort: "title", list: "trending", search: "", connecting: false, error: "", draft: null };
 const lib = { cards: null, cont: [], loading: false, error: null, at: 0 };
@@ -17,6 +24,9 @@ const reqs = { rows: null, loading: false, error: null, at: 0 };
 /** Connecting by itself with the connection built into the app (media.builtInConnection), once per
  *  start: "idle", "busy", "failed" (with `error`) or "done". `manual`: she chose to set it by hand. */
 const auto = { state: "idle", error: "", manual: false };
+let autoRun = null;
+/** "For you": `busy` is "fresh" or "more" while suggestions are being chosen; `tried`: asked once this start. */
+const picks = { busy: null, error: "", note: "", tried: false };
 const titles = new Map(); // "movie:603" → { title, year, poster }, from Jellyseerr
 
 const LIB_STALE = 2 * 60_000;
@@ -27,8 +37,13 @@ const cfg = media.cfg;
 
 // ---- loading
 
-async function autoConnect() {
-  if (auto.state !== "idle") return;
+/** Connects with the built-in connection when needed; one run at a time, shared by every caller. */
+function autoConnect() {
+  if (auto.state === "idle") autoRun = runAutoConnect();
+  return autoRun || Promise.resolve();
+}
+
+async function runAutoConnect() {
   auto.state = "busy";
   try {
     const built = await media.builtInConnection();
@@ -49,8 +64,13 @@ async function autoConnect() {
   }
 }
 
-async function loadLibrary() {
-  if (lib.loading) return;
+let libRun = null;
+function loadLibrary() {
+  if (!lib.loading) libRun = runLoadLibrary();
+  return libRun;
+}
+
+async function runLoadLibrary() {
   lib.loading = true;
   refreshIfHere();
   try {
@@ -124,13 +144,14 @@ async function loadRequests() {
 function ensureLoaded() {
   if (!here() || !cfg()?.token) return;
   const now = Date.now();
-  if (view.tab === "library" || view.tab === "discover") {
+  if (view.tab === "library" || view.tab === "discover" || view.tab === "foryou") {
     // the library also tells Discover what is already there
     if (!lib.loading && !lib.error && (!lib.cards || now - lib.at > LIB_STALE)) loadLibrary();
   }
   if (!cfg().seerr) return;
   if (view.tab === "discover" && !disc.loading && !disc.error && disc.key !== discKey()) loadDiscover();
   if (view.tab === "requests" && !reqs.loading && !reqs.error && (!reqs.rows || now - reqs.at > REQ_STALE)) loadRequests();
+  if (view.tab === "foryou" && !picks.busy && !picks.tried && !D.mediaPicks.items.length) makePicks();
 }
 
 // ---- posters: Jellyfin's come through the native shell, a few at a time, as they scroll near
@@ -170,6 +191,113 @@ function poster(url, alt = "") {
 }
 
 const jfPoster = (c, h = 330) => jellyfinImage(cfg().jellyfin, c.imageId, c.imageTag, h);
+
+// ---- For you: suggestions from what she finished (picks-core.js)
+
+/**
+ * Chooses suggestions: TMDB's recommendations of what she watched give the candidates, Claude picks
+ * among them (and may add a few of its own); without Claude the best candidates are kept as they
+ * are. `more` adds a few to those shown instead of replacing them. `auto`: the run at start, silent.
+ */
+async function makePicks({ more = false, auto = false } = {}) {
+  const c = cfg();
+  if (picks.busy || !c?.token || !c.seerr) return;
+  Object.assign(picks, { busy: more ? "more" : "fresh", error: "", tried: true });
+  refreshIfHere();
+  try {
+    if (!lib.cards || lib.loading) await loadLibrary();
+    if (!lib.cards) throw new Error(lib.error || "Your library could not be read.");
+    const seeds = seedsFrom(lib.cards);
+    if (!seeds.length) throw new Error("Finish a few films or series first: the suggestions start from what you watched.");
+    const lists = [];
+    await pool(seeds, 4, async seed => {
+      const results = await media.recommendations(seed.type, seed.tmdb).catch(() => null);
+      if (results) lists.push({ seed, results });
+    });
+    if (!lists.length) throw new Error("Jellyseerr gave no recommendations. Try again in a moment.");
+    const state = D.mediaPicks;
+    const exclude = new Set([...tmdbIndex(lib.cards).keys(), ...state.dismissed, ...(more ? state.items.map(p => p.key) : [])]);
+    const candidates = rankCandidates(lists, { exclude, avoid: new Set(state.shown) });
+    if (!candidates.length) throw new Error("Nothing new to propose for now.");
+    const count = more ? MORE : PICKS;
+    let chosen, by = "claude";
+    picks.note = "";
+    try {
+      const reply = await askAssistant(picksPrompt(tasteOf(lib.cards), candidates, count));
+      const got = parsePicks(reply, candidates, count);
+      chosen = got.picks;
+      for (const idea of got.ideas) {
+        const r = await media.findTitle(idea.title, idea.year, idea.type).catch(() => null);
+        if (!r) continue;
+        const card = seerrCard(r);
+        const key = keyOf(card.type, card.tmdb);
+        if (exclude.has(key) || card.status.key !== "none" || chosen.some(p => p.key === key)) continue;
+        chosen.push({ ...card, key, genres: genreNames(r.genreIds), why: idea.why || "Picked for you by Claude." });
+      }
+    } catch (e) {
+      by = "algo";
+      chosen = algoPicks(candidates, count);
+      picks.note = e?.code === "no-claude"
+        ? "Claude is not set up, so these come straight from what you watched."
+        : "Claude could not choose this time, so these come straight from what you watched.";
+    }
+    D.mediaPicks = keepBatch(state, chosen.map(toPick), { more, by, at: new Date().toISOString() });
+    save();
+  } catch (e) {
+    picks.error = mediaError(e, "Jellyseerr");
+    if (!auto && !here()) toast(picks.error, "error");
+  } finally {
+    picks.busy = null;
+    refreshIfHere();
+  }
+}
+
+function whenLabel(at) {
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return "";
+  const time = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return day === today() ? `today at ${time}` : `${fmtDay(day)} at ${time}`;
+}
+
+function pickCard(p) {
+  if (!titles.has(p.key)) titles.set(p.key, { ...p, status: { key: "none", label: "" } });
+  return `<div class="mv-pick">
+      <button class="mv-card" data-act="openTitle" data-type="${p.type}" data-tmdb="${esc(p.tmdb)}">
+        <span class="mv-poster">${poster(p.poster, p.title)}${p.asked ? `<span class="mv-badge pending">Asked for</span>` : ""}</span>
+        <span class="mv-t">${esc(p.title)}</span><span class="mv-s">${esc([p.year, p.type === "tv" ? "Series" : "Film", p.genres?.[0]].filter(Boolean).join(" · "))}</span>
+      </button>
+      ${p.why ? `<p class="mv-why">${esc(p.why)}</p>` : ""}
+      <button class="mv-x" data-act="dismissPick" data-key="${esc(p.key)}" title="Not for me" aria-label="Not for me: ${esc(p.title)}">${icon("close", 13)}</button>
+    </div>`;
+}
+
+function forYouTab() {
+  const s = D.mediaPicks;
+  const busy = picks.busy;
+  const sub = s.at
+    ? `${s.by === "claude" ? "Chosen by Claude" : "From your favourites"} from what you watched · ${whenLabel(s.at)}`
+    : "Films and series like the ones you finished.";
+  const head = `<div class="mv-fy-h">
+      <div><h2 class="mv-h">Picked for you</h2><p class="muted small">${esc(sub)}</p></div><span class="grow"></span>
+      <button class="btn soft small" data-act="morePicks" ${busy ? "disabled" : ""}>${busy === "more" ? `<span class="nb-spin small"></span> Choosing…` : `${icon("spark", 15)} Propose more`}</button>
+    </div>`;
+  const working = busy === "fresh"
+    ? `<div class="pl-working mv-working" role="status"><span class="nb-spin small" aria-hidden="true"></span><span>Claude is choosing films and series for you… This takes a minute.</span></div>` : "";
+  const note = picks.note && !busy ? `<p class="muted small mv-note">${esc(picks.note)}</p>` : "";
+  const err = picks.error && !busy ? errorCard(picks.error, "retryPicks") : "";
+  const body = s.items.length
+    ? `<div class="mv-grid mv-picks">${s.items.map(pickCard).join("")}</div>`
+    : busy || err ? "" : `<div class="empty small">No suggestions yet. Press “Propose more”.</div>`;
+  return `<section class="card mv-panel">${head}${working}${err}${note}${body}</section>`;
+}
+
+/** At start (main.js): connects by itself, then asks for fresh suggestions, in the background. */
+export async function onStart() {
+  await autoConnect();
+  const c = cfg();
+  if (c?.token && c.seerr && autoDue(D.mediaPicks)) makePicks({ auto: true });
+}
 
 // ---- the page
 
@@ -334,13 +462,13 @@ export function render() {
     </header>`;
   if (!c?.token) return head() + (auto.state === "done" || auto.manual ? setupPage() : autoPage());
   if (!c.seerr && view.tab !== "library") view.tab = "library";
-  const TABS = [["library", "Library"], ...(c.seerr ? [["discover", "Discover"], ["requests", "Requests"]] : [])];
+  const TABS = [["library", "Library"], ...(c.seerr ? [["foryou", "For you"], ["discover", "Discover"], ["requests", "Requests"]] : [])];
   const tabs = `<div class="mv-head-r">
       ${TABS.length > 1 ? `<div class="nb-seg" role="tablist">${TABS.map(([k, l]) => `<button class="nb-seg-b ${view.tab === k ? "on" : ""}" role="tab" aria-selected="${view.tab === k}" data-act="tab" data-k="${k}">${l}</button>`).join("")}</div>` : ""}
       ${view.tab === "library" ? `<button class="iconbtn" data-act="retryLibrary" title="Refresh" aria-label="Refresh" ${lib.loading ? "disabled" : ""}>${lib.loading && lib.cards ? `<span class="nb-spin small"></span>` : icon("repeat", 17)}</button>` : ""}
       <button class="iconbtn" data-act="connection" title="Connection" aria-label="Connection">${icon("gear", 17)}</button>
     </div>`;
-  const body = view.tab === "discover" ? discoverTab() : view.tab === "requests" ? requestsTab() : libraryTab();
+  const body = view.tab === "discover" ? discoverTab() : view.tab === "requests" ? requestsTab() : view.tab === "foryou" ? forYouTab() : libraryTab();
   return head(tabs) + body;
 }
 
@@ -365,8 +493,8 @@ function seasonsHtml(seasons) {
     const done = s.episodes.filter(e => e.state === "watched").length;
     return `<details class="mv-season" ${s.episodes.some(e => e.state !== "watched") && !seasons.slice(0, i).some(p => p.episodes.some(e => e.state !== "watched")) ? "open" : ""}>
         <summary><b>${esc(s.name)}</b><span class="muted small">${done}/${s.episodes.length} watched</span></summary>
-        <ol class="mv-eps">${s.episodes.map(e => `<li class="${e.state}"><span class="mv-ep-n">${e.number ?? ""}</span><span class="mv-ep-t">${esc(e.name)}</span>
-          ${e.state === "watched" ? `<span class="mv-done in">${icon("check", 12)}</span>` : e.state === "started" ? `<span class="mv-ep-p">${e.pct}%</span>` : ""}</li>`).join("")}</ol>
+        <ol class="mv-eps">${s.episodes.map(e => `<li class="${e.state}"><button type="button" class="mv-ep" data-ep="${esc(e.id)}" title="Play this episode in Jellyfin"><span class="mv-ep-n">${e.number ?? ""}</span><span class="mv-ep-t">${esc(e.name)}</span>
+          ${e.state === "watched" ? `<span class="mv-done in">${icon("check", 12)}</span>` : e.state === "started" ? `<span class="mv-ep-p">${e.pct}%</span>` : ""}<span class="mv-ep-play">${icon("play", 13)}</span></button></li>`).join("")}</ol>
       </details>`;
   }).join("");
 }
@@ -374,8 +502,8 @@ function seasonsHtml(seasons) {
 function openItem(id, fromCont) {
   const c = (fromCont ? lib.cont : lib.cards)?.find(x => x.id === id) || lib.cont.find(x => x.id === id);
   if (!c) return;
-  const conf = cfg();
   const series = c.type === "series";
+  let seasons = null; // a series' episodes, once loaded
   openModal({
     title: c.title,
     wide: true,
@@ -392,16 +520,46 @@ function openItem(id, fromCont) {
       </div>`,
     submit: "Play in Jellyfin",
     cancel: "Close",
-    onSubmit: () => {
-      media.openLink(jellyfinWebUrl(conf.jellyfin, c.id, conf.serverId)).catch(e => toast("Could not open Jellyfin: " + (e?.message || e), "error"));
-      return false;
-    },
+    onSubmit: async (values, form) => ((await play(c, form.querySelector('button[type="submit"]'), seasons)) ? undefined : false),
   });
   hydrate();
   if (series) {
     media.episodes(c.id)
-      .then(eps => { const box = $("#mv-seasons"); if (box) box.innerHTML = seasonsHtml(bySeason(eps)); })
+      .then(eps => {
+        seasons = bySeason(eps);
+        const box = $("#mv-seasons");
+        if (!box) return;
+        box.innerHTML = seasonsHtml(seasons);
+        box.onclick = async e => {
+          const b = e.target.closest("[data-ep]");
+          const ep = b && seasons.flatMap(x => x.episodes).find(x => x.id === b.dataset.ep);
+          if (ep && await play({ ...ep, type: "episode" }, b)) closeModal();
+        };
+      })
       .catch(e => { const box = $("#mv-seasons"); if (box) box.innerHTML = `<p class="mv-err">${esc(mediaError(e, "your Jellyfin"))}</p>`; });
+  }
+}
+
+/**
+ * Plays `c` in her Jellyfin app: a film or an episode from where she stopped, a series at the
+ * episode she is on (episodeToPlay). `btn` shows the wait. Resolves true once Jellyfin plays it.
+ */
+async function play(c, btn, seasons = null) {
+  const before = btn?.innerHTML;
+  if (btn) { btn.disabled = true; btn.innerHTML = `<span class="nb-spin small"></span> Opening Jellyfin…`; }
+  try {
+    let target = c;
+    if (c.type === "series") {
+      target = episodeToPlay(seasons || bySeason(await media.episodes(c.id)));
+      if (!target) throw new Error("This series has no episodes yet.");
+    }
+    await media.playInApp(target.id, target.state === "started" ? target.position : 0);
+    toast("Playing in Jellyfin 🌸");
+    return true;
+  } catch (e) {
+    toast(mediaError(e, "your Jellyfin"), "error");
+    if (btn) { btn.disabled = false; btn.innerHTML = before; }
+    return false;
   }
 }
 
@@ -409,13 +567,14 @@ function openItem(id, fromCont) {
 function markRequested(type, tmdb, approved) {
   const status = approved ? { key: "coming", label: "On its way" } : { key: "pending", label: "Waiting for approval" };
   for (const c of disc.results) if (c.type === type && String(c.tmdb) === String(tmdb)) c.status = status;
+  const pick = D.mediaPicks.items.find(p => p.key === keyOf(type, tmdb));
+  if (pick) { pick.asked = true; save(); }
   reqs.rows = null;
 }
 
 function openTitle(type, tmdb) {
   const known = disc.results.find(c => c.type === type && String(c.tmdb) === String(tmdb)) || titles.get(`${type}:${tmdb}`);
   const inLib = tmdbIndex(lib.cards || []).get(`${type}:${tmdb}`);
-  const conf = cfg();
   let seasons = null; // for a series, once its details are in
   // a series can still be asked for the seasons nobody asked for yet, whatever its status says
   const canAsk = s => !inLib && (type === "tv" ? s.key !== "available" && s.key !== "blocked" : s.canRequest);
@@ -435,10 +594,7 @@ function openTitle(type, tmdb) {
     submit: inLib ? "Play in Jellyfin" : "Request",
     cancel: "Close",
     onSubmit: async (values, form) => {
-      if (inLib) {
-        media.openLink(jellyfinWebUrl(conf.jellyfin, inLib.id, conf.serverId)).catch(e => toast("Could not open Jellyfin: " + (e?.message || e), "error"));
-        return false;
-      }
+      if (inLib) return (await play(inLib, form.querySelector('button[type="submit"]'))) ? undefined : false;
       const picked = type === "tv" ? (seasons || []).map(s => s.number).filter(n => values[`s${n}`]) : [];
       if (type === "tv" && !picked.length) { toast("Tick at least one season."); return false; }
       const btn = form.querySelector('button[type="submit"]');
@@ -560,6 +716,13 @@ export const actions = {
   retryDiscover: () => { disc.error = null; disc.key = ""; app.refresh(); },
   retryRequests: () => { reqs.error = null; loadRequests(); },
   retryAuto: () => { auto.state = "idle"; app.refresh(); },
+  morePicks: () => makePicks({ more: D.mediaPicks.items.length > 0 }),
+  retryPicks: () => makePicks(),
+  dismissPick: el => {
+    D.mediaPicks = dismiss(D.mediaPicks, el.dataset.key);
+    save();
+    app.refresh();
+  },
   manual: () => { auto.manual = true; app.refresh(); },
   openItem: el => openItem(el.dataset.id, el.dataset.cont === "1"),
   openTitle: el => openTitle(el.dataset.type, el.dataset.tmdb),

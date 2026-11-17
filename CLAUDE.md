@@ -162,8 +162,14 @@ The updater signing key is in `~/.tauri/bloom.key` (never commit it) and in the 
   matching sidebar. Unknown values fall back to the meadow.
 - Movies & series (`views/media.js`, nav "Movies"): her Jellyfin library (films and series, watched /
   started / not started, Continue watching, episodes per season) and Jellyseerr (Discover, search,
-  Request with season picking, her requests). Play opens Jellyfin's web page in her browser (`open_url`);
-  Bloom has no player. Both servers are on the homelab over Tailscale; every request goes through
+  Request with season picking, her requests). Play (a film, a series at the episode she is on, or one
+  episode) starts her Jellyfin app (`open_jellyfin_app`: Jellyfin Media Player, else Jellyfin Desktop)
+  and tells its session, through the server, to play from where she stopped (`playInApp` in `media.js`);
+  Bloom has no player. "For you" (`ui/js/picks-core.js`, `D.mediaPicks`, v9): the TMDB recommendations of
+  what she finished (through Jellyseerr) are the candidates, Claude picks 12 and says why (and may add 3
+  of its own, found by search); without Claude the best candidates are shown with "Because you watched".
+  New suggestions at each start (not within 30 minutes of the last), "Propose more" adds 8, "Not for me"
+  hides a title for good. Both servers are on the homelab over Tailscale; every request goes through
   `media_fetch` / `media_image` in the native shell (curl, since the CSP only allows ipc and http is
   blocked from the app's origin) and `/api/media`, `/api/media-image` in the preview. TMDB posters load
   directly (`https://image.tmdb.org` in the CSP's img-src). She never types the connection: the build

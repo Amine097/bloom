@@ -131,7 +131,7 @@ export function seedData() {
   });
 
   return {
-    version: 8,
+    version: 9,
     settings: { name: "", semesterStart: "2026-09-14", recall1: 7, recall2: 14, maxRecallsPerDay: 4, theme: "auto", background: "alternate", welcomed: false },
     modules,
     items,
@@ -144,6 +144,7 @@ export function seedData() {
     fiches: {},
     slideNotes: {},
     pdfMarks: {},
+    mediaPicks: { at: null, by: null, items: [], shown: [], dismissed: [] },
   };
 }
 

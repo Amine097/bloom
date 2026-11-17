@@ -2,7 +2,8 @@
 //! file (load, atomic save, one backup per day, export to the Downloads folder, where annotated
 //! PDFs are saved too), the lecture PDFs stored beside it in `pdfs/`, turning slides into PDFs
 //! with Keynote, and running the assistants' CLIs: Claude Code, and Codex as its backup (install,
-//! sign-in, asking), and the requests of the Movies & series page to her Jellyfin and Jellyseerr.
+//! sign-in, asking), and the requests of the Movies & series page to her Jellyfin and Jellyseerr
+//! (and starting her Jellyfin app, which Play then drives through the server).
 
 use std::fs;
 use std::io::{Read, Write};
@@ -1801,21 +1802,23 @@ async fn media_image(url: String) -> Result<tauri::ipc::Response, String> {
     .map_err(|e| e.to_string())?
 }
 
-/// Opens an http(s) link in her default browser (Play opens Jellyfin there).
+/// Starts her Jellyfin app, or brings it to the front. Play then reaches it through the Jellyfin
+/// server (remote control of its session). Returns the name of the app found.
 #[tauri::command]
-fn open_url(url: String) -> Result<(), String> {
-    if !media_url_ok(&url) {
-        return Err("invalid address".into());
+fn open_jellyfin_app() -> Result<String, String> {
+    for name in ["Jellyfin Media Player", "Jellyfin Desktop", "Jellyfin"] {
+        let opened = Command::new("/usr/bin/open")
+            .args(["-a", name])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if opened {
+            return Ok(name.to_string());
+        }
     }
-    let status = Command::new("/usr/bin/open")
-        .arg(&url)
-        .status()
-        .map_err(|e| format!("Could not open the link: {e}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err("Could not open the link.".into())
-    }
+    Err("The Jellyfin app is not on this Mac.".into())
 }
 
 /// The print dialog for the window (window.print() does nothing in WKWebView). The fiche viewer
@@ -1862,7 +1865,7 @@ pub fn run() {
             fiche_delete,
             media_fetch,
             media_image,
-            open_url,
+            open_jellyfin_app,
             print_page
         ])
         .run(tauri::generate_context!())

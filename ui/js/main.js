@@ -207,6 +207,7 @@ async function start() {
   }
   refresh();
   planner.onStart();
+  media.onStart();
   if (!D.settings.welcomed) welcome();
   else checkUpdate();
 }

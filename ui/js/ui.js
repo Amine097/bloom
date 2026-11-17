@@ -34,6 +34,7 @@ const PATHS = {
   chevL: "M15 6l-6 6 6 6",
   chevR: "M9 6l6 6-6 6",
   minus: "M5 12h14",
+  play: "M8 5.5v13l10.5-6.5z",
   film: "M4 4h16v16H4zM8 4v16M16 4v16M4 8h4M4 12h4M4 16h4M16 8h4M16 12h4M16 16h4",
 };
 export const icon = (name, size = 18) =>
